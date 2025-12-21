@@ -2,6 +2,8 @@ streamlit
 pymupdf
 groq
 neo4j
-langchain
+langgraph
 sentence-transformers
 python-dotenv
+numpy
+requests
