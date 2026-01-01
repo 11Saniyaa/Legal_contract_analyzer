@@ -275,67 +275,6 @@ elif page == "Search Clauses":
         else:
             st.warning("Please enter a search query.")
 
-elif page == "Precedent Matching":
-    st.header("⚖️ Precedent Matching")
-    st.write("Match contract clauses with legal precedents (case law, court decisions).")
-    
-    tab1, tab2 = st.tabs(["Match Precedents", "Add Precedent"])
-    
-    with tab1:
-        clause_text = st.text_area("Enter clause text:", height=100)
-        
-        with SuppressOutput():
-            contracts = retrieve_all_contracts()
-        
-        if contracts:
-            selected_contract = st.selectbox("Or select contract:", ["None"] + [f"{c['file_name']}" for c in contracts])
-            if selected_contract != "None":
-                contract_id = [c['id'] for c in contracts if c['file_name'] in selected_contract][0]
-                contract_data = retrieve_contract_from_db(contract_id)
-                if contract_data and contract_data.get('clauses'):
-                    selected_clause = st.selectbox("Select clause:", [c.get('clause_name') for c in contract_data['clauses']])
-                    if selected_clause:
-                        clause_data = [c for c in contract_data['clauses'] if c.get('clause_name') == selected_clause][0]
-                        clause_text = f"{clause_data.get('clause_name')} {clause_data.get('summary')}"
-        
-        top_k = st.slider("Number of precedents:", 1, 10, 5)
-        
-        if st.button("🔍 Match Precedents"):
-            if clause_text:
-                with st.spinner("Matching..."):
-                    with SuppressOutput():
-                        precedents = match_precedents(clause_text, top_k=top_k)
-                    if precedents:
-                        st.success(f"Found {len(precedents)} precedent(s)")
-                        for i, p in enumerate(precedents, 1):
-                            with st.expander(f"{i}. {p['case_name']} ({p['similarity']:.3f})"):
-                                st.write(f"**Court:** {p['court']} | **Date:** {p['date']}")
-                                st.write(f"**Summary:** {p['summary']}")
-                    else:
-                        st.warning("No precedents found. Add precedents first.")
-            else:
-                st.warning("Enter clause text or select a clause.")
-    
-    with tab2:
-        st.subheader("Add Precedent")
-        prec_id = st.text_input("Precedent ID:")
-        prec_title = st.text_input("Title:")
-        case_name = st.text_input("Case Name:")
-        court = st.text_input("Court:")
-        date = st.text_input("Date:")
-        summary = st.text_area("Summary:", height=150)
-        
-        if st.button("➕ Add"):
-            if prec_id and prec_title and summary:
-                with SuppressOutput():
-                    success = add_precedent(prec_id, prec_title, case_name, court, date, summary)
-                if success:
-                    st.success("✅ Added!")
-                else:
-                    st.error("Failed. Check Weaviate configuration.")
-            else:
-                st.warning("Fill required fields.")
-
 elif page == "Graph Visualization":
     st.header("📊 Graph Visualization")
     
