@@ -29,7 +29,7 @@ class SuppressOutput:
 with SuppressOutput():
     from legal_contract_analyzer import (
         workflow, pdf_hash, retrieve_all_contracts, retrieve_contract_from_db,
-        search_similar_clauses, view_contract_clean_graph
+        view_contract_clean_graph
     )
 
 # Page configuration
@@ -77,7 +77,7 @@ with st.sidebar:
     st.header("Navigation")
     page = st.radio(
         "Choose a page:",
-        ["Upload & Process", "View Contracts", "Search Clauses", "Graph Visualization"]
+        ["Upload & Process", "View Contracts", "Graph Visualization"]
     )
     st.markdown("---")
     st.info("💡 Make sure your .env file is configured with API keys")
@@ -238,41 +238,6 @@ elif page == "View Contracts":
                                         
     except Exception as e:
         st.error(f"Error loading contracts: {str(e)}")
-
-elif page == "Search Clauses":
-    st.header("🔍 Search Similar Clauses")
-    
-    st.write("Search for clauses similar to your query across all contracts in the database.")
-    
-    query = st.text_input(
-        "Enter search query:",
-        placeholder="e.g., payment terms, liability, termination clause"
-    )
-    
-    top_k = st.slider("Number of results:", min_value=1, max_value=20, value=5)
-    
-    if st.button("🔍 Search", type="primary"):
-        if query:
-            with st.spinner("Searching for similar clauses..."):
-                try:
-                    with SuppressOutput():
-                        results = search_similar_clauses(query, top_k=top_k)
-                    
-                    if results:
-                        st.success(f"Found {len(results)} similar clause(s)")
-                        
-                        for i, result in enumerate(results, 1):
-                            with st.expander(f"Result {i}: {result['clause']} (Similarity: {result['similarity']:.4f})"):
-                                st.write(f"**Contract:** {result['contract']}")
-                                st.write(f"**Clause:** {result['clause']}")
-                                st.write(f"**Summary:** {result['summary']}")
-                                st.write(f"**Similarity Score:** {result['similarity']:.4f}")
-                    else:
-                        st.warning("No similar clauses found.")
-                except Exception as e:
-                    st.error(f"Error searching: {str(e)}")
-        else:
-            st.warning("Please enter a search query.")
 
 elif page == "Graph Visualization":
     st.header("📊 Graph Visualization")
