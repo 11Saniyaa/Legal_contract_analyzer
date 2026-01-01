@@ -30,7 +30,7 @@ with SuppressOutput():
     from legal_contract_analyzer import (
         workflow, pdf_hash, retrieve_all_contracts, retrieve_contract_from_db,
         search_similar_clauses, view_contract_clean_graph, fix_all_risk_levels,
-        validate_and_fix_contract_data, match_precedents, add_precedent
+        validate_and_fix_contract_data
     )
 
 # Page configuration
@@ -78,7 +78,7 @@ with st.sidebar:
     st.header("Navigation")
     page = st.radio(
         "Choose a page:",
-        ["Upload & Process", "View Contracts", "Search Clauses", "Precedent Matching", "Graph Visualization", "Database Tools"]
+        ["Upload & Process", "View Contracts", "Search Clauses", "Graph Visualization", "Database Tools"]
     )
     st.markdown("---")
     st.info("💡 Make sure your .env file is configured with API keys")
