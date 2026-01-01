@@ -29,8 +29,7 @@ class SuppressOutput:
 with SuppressOutput():
     from legal_contract_analyzer import (
         workflow, pdf_hash, retrieve_all_contracts, retrieve_contract_from_db,
-        search_similar_clauses, view_contract_clean_graph, fix_all_risk_levels,
-        validate_and_fix_contract_data
+        search_similar_clauses, view_contract_clean_graph
     )
 
 # Page configuration
@@ -78,7 +77,7 @@ with st.sidebar:
     st.header("Navigation")
     page = st.radio(
         "Choose a page:",
-        ["Upload & Process", "View Contracts", "Search Clauses", "Graph Visualization", "Database Tools"]
+        ["Upload & Process", "View Contracts", "Search Clauses", "Graph Visualization"]
     )
     st.markdown("---")
     st.info("💡 Make sure your .env file is configured with API keys")
@@ -322,41 +321,6 @@ elif page == "Graph Visualization":
                             st.error(f"Error generating query: {str(e)}")
     except Exception as e:
         st.error(f"Error: {str(e)}")
-
-elif page == "Database Tools":
-    st.header("🔧 Database Tools")
-    
-    st.write("Tools to fix and validate data in the database")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Fix Risk Levels")
-        st.write("Normalize all risk levels in the database to uppercase (LOW, MEDIUM, HIGH)")
-        if st.button("Fix All Risk Levels", type="primary"):
-            with st.spinner("Fixing risk levels..."):
-                try:
-                    with SuppressOutput():
-                        fixed_count = fix_all_risk_levels()
-                    st.success(f"✅ Fixed {fixed_count} risk levels!")
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-    
-    with col2:
-        st.subheader("Validate All Data")
-        st.write("Check and fix all contract data quality issues")
-        if st.button("Run Data Validation", type="primary"):
-            with st.spinner("Validating data..."):
-                try:
-                    with SuppressOutput():
-                        result = validate_and_fix_contract_data()
-                    st.success(f"✅ Validation complete!")
-                    st.json({
-                        "Issues Found": result.get('issues_found', 0),
-                        "Fixes Applied": result.get('fixes_applied', 0)
-                    })
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
 
 # Footer
 st.markdown("---")
