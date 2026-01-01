@@ -765,12 +765,23 @@ CRITICAL: Return ONLY valid JSON. No markdown, no explanations, just the JSON ob
 
 IMPORTANT INSTRUCTIONS:
 1. Extract ALL major clauses from the contract (aim for 5-10 clauses)
-2. For risk_reason: Explain WHY you assigned that risk level with specific concerns
-3. For ai_summary: Provide detailed analysis (at least 2-3 sentences)
-4. Be thorough - don't leave fields empty
-5. Focus on: payment terms, termination, liability, intellectual property, confidentiality, warranties, indemnification
-6. ESCAPE all quotes inside strings properly using backslash
-7. Do NOT include any text before or after the JSON object
+2. CRITICAL: For EACH clause, you MUST assign a risk_level. Use:
+   - "LOW" for clauses with minimal risk (standard terms, favorable conditions)
+   - "MEDIUM" for clauses with moderate risk (some concerns, standard legal language)
+   - "HIGH" for clauses with significant risk (unfavorable terms, high liability, strict penalties)
+   - DO NOT use "Medium", "Low", "High" - ONLY uppercase: LOW, MEDIUM, HIGH
+   - DO NOT leave risk_level empty or null - ALWAYS assign one of the three values
+3. For risk_reason: Explain WHY you assigned that risk level with specific concerns
+4. For ai_summary: Provide detailed analysis (at least 2-3 sentences)
+5. Be thorough - don't leave fields empty
+6. Focus on: payment terms, termination, liability, intellectual property, confidentiality, warranties, indemnification
+7. ESCAPE all quotes inside strings properly using backslash
+8. Do NOT include any text before or after the JSON object
+
+RISK LEVEL GUIDELINES:
+- HIGH: Unfavorable termination clauses, unlimited liability, strict penalties, one-sided terms
+- MEDIUM: Standard legal language, moderate obligations, typical industry terms
+- LOW: Favorable terms, standard protections, reasonable conditions
 
 CONTRACT TEXT:
 {state["text"][:10000]}
