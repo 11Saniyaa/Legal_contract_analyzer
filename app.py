@@ -78,7 +78,7 @@ with st.sidebar:
     st.header("Navigation")
     page = st.radio(
         "Choose a page:",
-        ["Upload & Process", "View Contracts", "Search Clauses", "Graph Visualization", "Database Tools"]
+        ["Upload & Process", "View Contracts", "Search Clauses", "Precedent Matching", "Graph Visualization", "Database Tools"]
     )
     st.markdown("---")
     st.info("💡 Make sure your .env file is configured with API keys")
