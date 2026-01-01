@@ -1097,86 +1097,32 @@ def search_similar_clauses(query_text, top_k=5):
         return clauses[:top_k]
 
 # ===== PROCESS CONTRACTS =====
-pdfs = [
-    "Legal-Services-Agreement.pdf",
-    "Employment_contract.pdf",
-    "sample_contract.pdf"
-]
-
-contract_ids = []
-
-for pdf in pdfs:
-    cid = pdf_hash(pdf)
-    contract_ids.append(cid)
-
-    print("\n" + "="*80)
-    print(f"🚀 Processing: {pdf}")
-    print("="*80)
-
-    workflow.invoke({
-        "pdf_path": pdf,
-        "cid": cid,
-        "text": "",
-        "embeddings": [],
-        "analysis": {},
-    })
-
-# ===== RETRIEVE AND DISPLAY RESULTS FOR ALL CONTRACTS =====
-
-print("\n\n" + "#"*80)
-print("# RETRIEVING ALL STORED CONTRACTS FROM DATABASE")
-print("#"*80)
-
-# Check if required functions are defined
-try:
-    # Test if functions exist
-    if 'retrieve_all_contracts' not in globals():
-        raise NameError("retrieve_all_contracts function not found")
-    if 'retrieve_contract_from_db' not in globals():
-        raise NameError("retrieve_contract_from_db function not found")
-    if 'print_contract_summary' not in globals():
-        raise NameError("print_contract_summary function not found")
-    
-    # Get all contracts from database
-    all_contracts = retrieve_all_contracts()
-    
-    if not all_contracts:
-        print("\n[ERROR] No contracts found in database")
-    else:
-        print(f"\n[STATS] Found {len(all_contracts)} contract(s) in database")
-        print("="*80)
-        
-        # Retrieve and display summary for EACH contract
-        for i, contract in enumerate(all_contracts, 1):
-            print(f"\n\n{'='*80}")
-            print(f"[DOC] CONTRACT {i} of {len(all_contracts)}")
-            print(f"{'='*80}")
-            
-            try:
-                contract_data = retrieve_contract_from_db(contract['id'])
-                if contract_data:
-                    print_contract_summary(contract_data)
-                else:
-                    print(f"[ERROR] Could not retrieve details for: {contract['title']}")
-            except Exception as e:
-                print(f"[ERROR] Error retrieving contract {contract['title']}: {str(e)}")
-                continue
-        
-        print(f"\n\n{'='*80}")
-        print(f"[OK] Displayed summaries for {len(all_contracts)} contract(s)")
-        print(f"{'='*80}")
-        
-except NameError as e:
-    print(f"\n[ERROR] ERROR: {str(e)}")
-    print("\n[TIP] SOLUTION: Please run the cells in order:")
-    print("   1. Run all cells from the beginning")
-    print("   2. Make sure the cell containing 'retrieve_all_contracts' function is executed")
-    print("   3. Then run this cell again")
-    print("\n   Or run: Kernel -> Restart & Run All")
-    
-except Exception as e:
-    print(f"\n[ERROR] Unexpected error: {str(e)}")
-    print("[TIP] Check your Neo4j connection and try again")
+# This code is commented out - it should be called from main() or via the web interface
+# Uncomment and modify as needed:
+# 
+# pdfs = [
+#     "Legal-Services-Agreement.pdf",
+#     "Employment_contract.pdf",
+#     "sample_contract.pdf"
+# ]
+# 
+# contract_ids = []
+# 
+# for pdf in pdfs:
+#     cid = pdf_hash(pdf)
+#     contract_ids.append(cid)
+# 
+#     print("\n" + "="*80)
+#     print(f"[PROCESS] Processing: {pdf}")
+#     print("="*80)
+# 
+#     workflow.invoke({
+#         "pdf_path": pdf,
+#         "cid": cid,
+#         "text": "",
+#         "embeddings": [],
+#         "analysis": {},
+#     })
 
 # ===== VIEW INDIVIDUAL CONTRACT GRAPHS =====
 
@@ -1382,13 +1328,15 @@ def list_contracts_for_viewing():
     
     return contracts
 
-print("[OK] Individual contract graph viewing functions loaded!")
-print("\nUsage:")
-print("  1. reconnect_neo4j() - Reconnect if you get connection errors")
-print("  2. list_contracts_for_viewing() - See all contracts")
-print("  3. view_individual_contract_graph(contract_id='...') - View one contract")
-print("  4. get_contract_cypher_query(contract_id='...') - Get Cypher query for Browser")
-print("\n[TIP] If you get connection errors, run: reconnect_neo4j()")
+# Print statements commented out - they run on import and cause issues
+# Uncomment if running as a script:
+# print("[OK] Individual contract graph viewing functions loaded!")
+# print("\nUsage:")
+# print("  1. reconnect_neo4j() - Reconnect if you get connection errors")
+# print("  2. list_contracts_for_viewing() - See all contracts")
+# print("  3. view_individual_contract_graph(contract_id='...') - View one contract")
+# print("  4. get_contract_cypher_query(contract_id='...') - Get Cypher query for Browser")
+# print("\n[TIP] If you get connection errors, run: reconnect_neo4j()")
 
 
 # ===== QUICK FIX: Reconnect Neo4j =====
@@ -1423,10 +1371,11 @@ except Exception as e:
 
 
 # ===== VECTOR SIMILARITY SEARCH EXAMPLE =====
-
-print("\n\n" + "#"*80)
-print("# VECTOR SIMILARITY SEARCH")
-print("#"*80)
+# This code is commented out - it should be called from main() or via the web interface
+# Uncomment as needed:
+# print("\n\n" + "#"*80)
+# print("# VECTOR SIMILARITY SEARCH")
+# print("#"*80)
 
 # ===== Cleanup on Exit =====
 atexit.register(lambda: neo4j_driver.close() if 'neo4j_driver' in globals() else None)
@@ -1473,7 +1422,7 @@ def cleanup_old_structure_nodes():
         print(f"   Total: {total_old}")
         
         # Delete relationships first, then nodes
-        print(f"\n🗑️ Deleting old relationships and nodes...")
+        print(f"\n[DELETE] Deleting old relationships and nodes...")
         
         # Delete relationships
         s.run("MATCH ()-[r:HAS_AI_SUMMARY]->() DELETE r")
@@ -1610,8 +1559,9 @@ RETURN c, o, d, single_clause as cl"""
             "total_clauses": total_clauses
         }
 
-print("[OK] Function loaded: view_one_contract_one_summary()")
-print("[TIP] Usage: view_one_contract_one_summary(contract_id='...', clause_index=0)")
+# Print statements commented out - they run on import
+# print("[OK] Function loaded: view_one_contract_one_summary()")
+# print("[TIP] Usage: view_one_contract_one_summary(contract_id='...', clause_index=0)")
 
 
 # ===== CLEAN GRAPH VISUALIZATION: One Contract with All Clauses (Organized) =====
@@ -1736,8 +1686,9 @@ ORDER BY cl.risk_level DESC, cl.name"""
             "cypher_query": query
         }
 
-print("[OK] Function loaded: view_contract_clean_graph()")
-print("[TIP] Usage: view_contract_clean_graph(contract_id='...')")
+# Print statements commented out - they run on import
+# print("[OK] Function loaded: view_contract_clean_graph()")
+# print("[TIP] Usage: view_contract_clean_graph(contract_id='...')")
 
 
 # ===== DATA VALIDATION: Check and Fix Data Quality =====
