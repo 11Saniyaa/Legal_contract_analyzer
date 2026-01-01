@@ -541,7 +541,23 @@ def print_contract_summary(data):
         print(f"\n[Clause {i}] {c.get('clause_name', 'Unnamed')}")
         print("-"*80)
         print(f"Summary      : {c.get('summary', 'N/A')}")
-        print(f"\n[RISK] Risk Level : {c.get('risk_level', 'N/A')}")
+        
+        # Normalize risk level for display
+        risk_level_raw = c.get('risk_level', 'MEDIUM')
+        if isinstance(risk_level_raw, str):
+            risk_level_upper = risk_level_raw.strip().upper()
+            if risk_level_upper in ["LOW", "L"]:
+                risk_level_display = "LOW"
+            elif risk_level_upper in ["MEDIUM", "MED", "M", "MEDI"]:
+                risk_level_display = "MEDIUM"
+            elif risk_level_upper in ["HIGH", "H"]:
+                risk_level_display = "HIGH"
+            else:
+                risk_level_display = "MEDIUM"
+        else:
+            risk_level_display = "MEDIUM"
+        
+        print(f"\n[RISK] Risk Level : {risk_level_display}")
         print(f"Risk Reason  : {c.get('risk_reason', 'N/A')}")
         print(f"\n[OBLIGATION] Obligation : {c.get('obligation', 'N/A')}")
         print(f"[LIABILITY] Liability  : {c.get('liability', 'N/A')}")
@@ -832,6 +848,10 @@ CONTRACT TEXT:
         # Attempt to parse
         try:
             analysis = json.loads(content)
+            
+            # CRITICAL: Validate and normalize risk levels immediately after parsing
+            analysis = validate_analysis_data(analysis)
+            
         except json.JSONDecodeError as e:
             print(f"[WARNING] JSON parsing failed at position {e.pos}: {e.msg}")
             print(f"Problematic content around error: ...{content[max(0,e.pos-50):e.pos+50]}...")
@@ -846,9 +866,11 @@ CONTRACT TEXT:
             try:
                 analysis = json.loads(content)
                 print("[OK] JSON fixed and parsed successfully")
+                # CRITICAL: Validate and normalize risk levels after fixing JSON
+                analysis = validate_analysis_data(analysis)
             except:
                 print("[ERROR] Could not fix JSON, using fallback structure")
-                # Fallback structure
+                # Fallback structure (with normalized risk level)
                 analysis = {
                     "title": "Contract Analysis",
                     "parties": [{"name": "Party A", "role": "Unknown"}, {"name": "Party B", "role": "Unknown"}],
@@ -858,7 +880,7 @@ CONTRACT TEXT:
                         {
                             "clause_name": "General Terms",
                             "summary": "Contract terms extracted from document",
-                            "risk_level": "Medium",
+                            "risk_level": "MEDIUM",  # Fixed: Use uppercase
                             "risk_reason": "Unable to fully analyze due to parsing error. Manual review recommended.",
                             "obligation": "Review document manually for obligations",
                             "liability": "Review document manually for liabilities",
@@ -866,6 +888,8 @@ CONTRACT TEXT:
                         }
                     ]
                 }
+                # Validate fallback structure too
+                analysis = validate_analysis_data(analysis)
         
         print(f"[OK] Analysis complete - Found {len(analysis.get('clauses', []))} clauses")
 
