@@ -379,18 +379,31 @@ def validate_analysis_data(data: dict) -> dict:
     validated_clauses = []
     for clause in validated["clauses"]:
         if isinstance(clause, dict):
+            # Normalize risk_level to uppercase
+            risk_level_raw = clause.get("risk_level", "MEDIUM")
+            if isinstance(risk_level_raw, str):
+                risk_level_upper = risk_level_raw.strip().upper()
+                # Map common variations to standard values
+                if risk_level_upper in ["LOW", "L"]:
+                    risk_level_normalized = "LOW"
+                elif risk_level_upper in ["MEDIUM", "MED", "M"]:
+                    risk_level_normalized = "MEDIUM"
+                elif risk_level_upper in ["HIGH", "H"]:
+                    risk_level_normalized = "HIGH"
+                else:
+                    risk_level_normalized = "MEDIUM"  # Default fallback
+            else:
+                risk_level_normalized = "MEDIUM"
+            
             validated_clause = {
                 "clause_name": clause.get("clause_name", "Unnamed Clause"),
                 "summary": clause.get("summary", ""),
-                "risk_level": clause.get("risk_level", "MEDIUM"),
+                "risk_level": risk_level_normalized,
                 "risk_reason": clause.get("risk_reason", ""),
                 "obligation": clause.get("obligation", ""),
                 "liability": clause.get("liability", ""),
                 "ai_summary": clause.get("ai_summary", "")
             }
-            # Ensure risk_level is valid
-            if validated_clause["risk_level"] not in ["LOW", "MEDIUM", "HIGH"]:
-                validated_clause["risk_level"] = "MEDIUM"
             validated_clauses.append(validated_clause)
     
     validated["clauses"] = validated_clauses
@@ -736,7 +749,7 @@ CRITICAL: Return ONLY valid JSON. No markdown, no explanations, just the JSON ob
     {{
       "clause_name": "Name of the clause",
       "summary": "Brief summary of what this clause says",
-      "risk_level": "Low/Medium/High",
+      "risk_level": "LOW or MEDIUM or HIGH (must be uppercase)",
       "risk_reason": "Detailed explanation of why this risk level was assigned. Mention specific concerns, potential liabilities, or unfavorable terms.",
       "obligation": "Specific obligations this clause imposes on parties. Be detailed.",
       "liability": "What liabilities or penalties are mentioned in this clause. Include financial limits if any.",
@@ -912,7 +925,18 @@ def store_graph_agent(state: ContractState):
             # Added display labels for better Neo4j visualization
             clause_name_clean = safe_str(cl.get("clause_name")) or "Unnamed Clause"
             summary_clean = safe_str(cl.get("summary")) or ""
-            risk_level_clean = safe_str(cl.get("risk_level")) or "MEDIUM"
+            
+            # Normalize risk_level to uppercase
+            risk_level_raw = safe_str(cl.get("risk_level")) or "MEDIUM"
+            risk_level_upper = risk_level_raw.strip().upper()
+            if risk_level_upper in ["LOW", "L"]:
+                risk_level_clean = "LOW"
+            elif risk_level_upper in ["MEDIUM", "MED", "M"]:
+                risk_level_clean = "MEDIUM"
+            elif risk_level_upper in ["HIGH", "H"]:
+                risk_level_clean = "HIGH"
+            else:
+                risk_level_clean = "MEDIUM"  # Default fallback
             
             s.run("""
             MATCH (c:Contract {id:$id})
@@ -1691,6 +1715,63 @@ ORDER BY cl.risk_level DESC, cl.name"""
 # print("[TIP] Usage: view_contract_clean_graph(contract_id='...')")
 
 
+# ===== FIX EXISTING RISK LEVELS IN DATABASE =====
+def fix_all_risk_levels():
+    """
+    Fix all risk levels in the database by normalizing them to uppercase
+    This function should be run once to fix existing data
+    """
+    print("\n" + "="*80)
+    print("[FIX] Normalizing all risk levels in database")
+    print("="*80)
+    
+    fixed_count = 0
+    
+    with neo4j_driver.session() as s:
+        # Get all clauses
+        result = s.run("""
+            MATCH (cl:Clause)
+            RETURN cl.name as name, cl.contract_id as cid, cl.risk_level as risk_level
+        """)
+        
+        for record in result:
+            clause_name = record["name"]
+            contract_id = record["cid"]
+            risk_level_raw = record["risk_level"]
+            
+            if risk_level_raw:
+                risk_level_upper = str(risk_level_raw).strip().upper()
+                # Normalize to standard values
+                if risk_level_upper in ["LOW", "L"]:
+                    risk_level_normalized = "LOW"
+                elif risk_level_upper in ["MEDIUM", "MED", "M"]:
+                    risk_level_normalized = "MEDIUM"
+                elif risk_level_upper in ["HIGH", "H"]:
+                    risk_level_normalized = "HIGH"
+                else:
+                    risk_level_normalized = "MEDIUM"
+                
+                # Update if different
+                if risk_level_upper != risk_level_normalized or risk_level_raw != risk_level_normalized:
+                    s.run("""
+                        MATCH (cl:Clause {name: $name, contract_id: $cid})
+                        SET cl.risk_level = $normalized
+                    """, name=clause_name, cid=contract_id, normalized=risk_level_normalized)
+                    fixed_count += 1
+                    print(f"   Fixed: {clause_name} - {risk_level_raw} -> {risk_level_normalized}")
+            else:
+                # Missing risk level - set to MEDIUM
+                s.run("""
+                    MATCH (cl:Clause {name: $name, contract_id: $cid})
+                    SET cl.risk_level = 'MEDIUM'
+                """, name=clause_name, cid=contract_id)
+                fixed_count += 1
+                print(f"   Fixed: {clause_name} - (missing) -> MEDIUM")
+    
+    print(f"\n[OK] Fixed {fixed_count} risk levels in database")
+    return fixed_count
+
+
 # ===== DATA VALIDATION: Check and Fix Data Quality =====
 def validate_and_fix_contract_data():
     """
@@ -1738,10 +1819,31 @@ def validate_and_fix_contract_data():
                     """, old_name=clause_name, cid=contract_id)
                     fixes_applied += 1
                 
-                # Check risk level
-                risk_level = clause.get("risk_level", "").upper()
-                if risk_level not in ["LOW", "MEDIUM", "HIGH"]:
-                    issues.append(f"Invalid risk level: {risk_level}")
+                # Check and normalize risk level
+                risk_level_raw = clause.get("risk_level", "")
+                if risk_level_raw:
+                    risk_level_upper = str(risk_level_raw).strip().upper()
+                    # Normalize to standard values
+                    if risk_level_upper in ["LOW", "L"]:
+                        risk_level_normalized = "LOW"
+                    elif risk_level_upper in ["MEDIUM", "MED", "M"]:
+                        risk_level_normalized = "MEDIUM"
+                    elif risk_level_upper in ["HIGH", "H"]:
+                        risk_level_normalized = "HIGH"
+                    else:
+                        risk_level_normalized = "MEDIUM"  # Default fallback
+                        issues.append(f"Invalid risk level: {risk_level_raw}, normalized to MEDIUM")
+                    
+                    # Update if different
+                    if risk_level_upper != risk_level_normalized:
+                        s.run("""
+                            MATCH (cl:Clause {name: $name, contract_id: $cid})
+                            SET cl.risk_level = $normalized
+                        """, name=clause.get("name"), cid=contract_id, normalized=risk_level_normalized)
+                        fixes_applied += 1
+                else:
+                    # Missing risk level
+                    issues.append("Missing risk level")
                     s.run("""
                         MATCH (cl:Clause {name: $name, contract_id: $cid})
                         SET cl.risk_level = 'MEDIUM'
