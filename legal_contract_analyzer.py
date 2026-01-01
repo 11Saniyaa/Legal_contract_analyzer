@@ -385,19 +385,27 @@ def validate_analysis_data(data: dict) -> dict:
     for clause in validated["clauses"]:
         if isinstance(clause, dict):
             # Normalize risk_level to uppercase
-            risk_level_raw = clause.get("risk_level", "MEDIUM")
-            if isinstance(risk_level_raw, str):
+            risk_level_raw = clause.get("risk_level")
+            clause_name = clause.get("clause_name", "Unknown")
+            
+            # Check if risk_level is missing or empty
+            if not risk_level_raw or (isinstance(risk_level_raw, str) and risk_level_raw.strip() == ""):
+                print(f"[WARNING] Clause '{clause_name}' missing risk_level - defaulting to MEDIUM")
+                risk_level_normalized = "MEDIUM"
+            elif isinstance(risk_level_raw, str):
                 risk_level_upper = risk_level_raw.strip().upper()
                 # Map common variations to standard values
                 if risk_level_upper in ["LOW", "L"]:
                     risk_level_normalized = "LOW"
-                elif risk_level_upper in ["MEDIUM", "MED", "M"]:
+                elif risk_level_upper in ["MEDIUM", "MED", "M", "MEDI"]:
                     risk_level_normalized = "MEDIUM"
                 elif risk_level_upper in ["HIGH", "H"]:
                     risk_level_normalized = "HIGH"
                 else:
+                    print(f"[WARNING] Invalid risk_level '{risk_level_raw}' for clause '{clause_name}' - defaulting to MEDIUM")
                     risk_level_normalized = "MEDIUM"  # Default fallback
             else:
+                print(f"[WARNING] Non-string risk_level '{risk_level_raw}' (type: {type(risk_level_raw)}) for clause '{clause_name}' - defaulting to MEDIUM")
                 risk_level_normalized = "MEDIUM"
             
             validated_clause = {
