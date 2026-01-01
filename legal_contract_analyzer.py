@@ -849,8 +849,22 @@ CONTRACT TEXT:
         try:
             analysis = json.loads(content)
             
+            # Debug: Check what risk levels the LLM returned (before normalization)
+            if "clauses" in analysis:
+                clauses = analysis.get("clauses", [])
+                risk_levels_raw = [c.get("risk_level") for c in clauses if c.get("risk_level")]
+                if risk_levels_raw:
+                    print(f"[DEBUG] LLM returned risk levels (raw): {set(risk_levels_raw)}")
+            
             # CRITICAL: Validate and normalize risk levels immediately after parsing
             analysis = validate_analysis_data(analysis)
+            
+            # Debug: Check normalized risk levels
+            if "clauses" in analysis:
+                clauses = analysis.get("clauses", [])
+                risk_levels_normalized = [c.get("risk_level") for c in clauses if c.get("risk_level")]
+                if risk_levels_normalized:
+                    print(f"[DEBUG] Risk levels after normalization: {set(risk_levels_normalized)}")
             
         except json.JSONDecodeError as e:
             print(f"[WARNING] JSON parsing failed at position {e.pos}: {e.msg}")
