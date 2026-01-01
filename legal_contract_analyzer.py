@@ -49,8 +49,17 @@ from groq import Groq
 from neo4j import GraphDatabase
 from langgraph.graph import StateGraph, END
 from sentence_transformers import SentenceTransformer
-import weaviate
-from weaviate.classes.config import Configure, Property, DataType
+# Weaviate is optional - will fallback to Neo4j if not available
+try:
+    import weaviate
+    from weaviate.classes.config import Configure, Property, DataType
+    from weaviate.classes.query import MetadataQuery
+    WEAVIATE_AVAILABLE = True
+except ImportError:
+    WEAVIATE_AVAILABLE = False
+    weaviate = None
+    print("[INFO] Weaviate not installed. Install with: pip install weaviate-client")
+    print("[INFO] Vector search will use Neo4j cosine similarity (slower but works)")
 
 # Embedding configuration
 EMBEDDING_DIM = 384  # Standardized dimension for all-MiniLM-L6-v2
@@ -456,37 +465,54 @@ except Exception as e:
     print("   3. Your Aura database is running")
     raise
 
-# ===== WEAVIATE CLIENT INITIALIZATION =====
+# ===== WEAVIATE CLIENT INITIALIZATION (OPTIONAL) =====
 weaviate_client = None
 weaviate_available = False
 
-try:
-    weaviate_url = os.getenv('WEAVIATE_URL', 'http://localhost:8080')
-    weaviate_api_key = os.getenv('WEAVIATE_API_KEY')
-    
-    if weaviate_api_key:
-        weaviate_client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=weaviate_url,
-            auth_credentials=weaviate.auth.AuthApiKey(api_key=weaviate_api_key)
-        )
-    else:
-        # Local Weaviate (no auth) - parse URL
-        url_parts = weaviate_url.replace('http://', '').replace('https://', '').split(':')
-        host = url_parts[0] if url_parts else 'localhost'
-        port = int(url_parts[1]) if len(url_parts) > 1 else 8080
-        weaviate_client = weaviate.connect_to_local(host=host, port=port)
-    
-    # Test connection
-    if weaviate_client.is_ready():
-        weaviate_available = True
-        print("[OK] Weaviate connection successful!")
-    else:
-        print("[WARNING] Weaviate connection test failed")
+if WEAVIATE_AVAILABLE:
+    try:
+        weaviate_url = os.getenv('WEAVIATE_URL')
+        weaviate_api_key = os.getenv('WEAVIATE_API_KEY')
+        
+        if not weaviate_url:
+            print("[INFO] WEAVIATE_URL not set. Using Neo4j for vector search (no Docker needed!)")
+            weaviate_available = False
+        else:
+            if weaviate_api_key:
+                # Weaviate Cloud (WCS) - No Docker needed!
+                weaviate_client = weaviate.connect_to_weaviate_cloud(
+                    cluster_url=weaviate_url,
+                    auth_credentials=weaviate.auth.AuthApiKey(api_key=weaviate_api_key)
+                )
+                print("[INFO] Connecting to Weaviate Cloud (no Docker needed)")
+            else:
+                # Local Weaviate (requires Docker or local installation)
+                try:
+                    url_parts = weaviate_url.replace('http://', '').replace('https://', '').split(':')
+                    host = url_parts[0] if url_parts else 'localhost'
+                    port = int(url_parts[1]) if len(url_parts) > 1 else 8080
+                    weaviate_client = weaviate.connect_to_local(host=host, port=port)
+                    print("[INFO] Connecting to local Weaviate instance")
+                except Exception as local_error:
+                    print(f"[WARNING] Local Weaviate connection failed: {local_error}")
+                    print("[INFO] Use Weaviate Cloud (WCS) instead - no Docker needed!")
+                    print("[INFO] Get free cluster at: https://console.weaviate.io")
+                    weaviate_available = False
+            
+            # Test connection
+            if weaviate_client and weaviate_client.is_ready():
+                weaviate_available = True
+                print("[OK] Weaviate connection successful!")
+            else:
+                print("[WARNING] Weaviate connection test failed")
+                weaviate_available = False
+                print("[INFO] Falling back to Neo4j vector search (works without Weaviate)")
+    except Exception as e:
+        print(f"[WARNING] Weaviate setup failed: {e}")
+        print("[INFO] Will use Neo4j cosine similarity (no Docker needed!)")
         weaviate_available = False
-except Exception as e:
-    print(f"[WARNING] Weaviate not available: {e}")
-    print("[INFO] Will use manual cosine similarity in Neo4j as fallback")
-    weaviate_available = False
+else:
+    print("[INFO] Weaviate not installed. Using Neo4j for vector search (no Docker needed!)")
 
 # ===== WEAVIATE SCHEMA SETUP =====
 def _setup_weaviate_schema():

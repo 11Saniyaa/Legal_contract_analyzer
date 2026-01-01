@@ -46,10 +46,14 @@ Contract
 ### Prerequisites
 
 - Python 3.8+
-- Neo4j Database (local or cloud instance)
+- Neo4j Database (local or cloud instance - Neo4j Aura recommended)
 - API Keys:
   - Groq API Key
   - HuggingFace API Token
+- **Weaviate (Optional)** - For faster vector search:
+  - **Option 1 (Recommended)**: Weaviate Cloud (WCS) - Free tier available, no Docker needed
+  - **Option 2**: Local Weaviate (requires Docker)
+  - **Option 3**: Skip Weaviate - System will use Neo4j for vector search (slower but works)
 
 ### Installation
 
@@ -66,11 +70,27 @@ pip install -r requirements.txt
 
 3. Create a `.env` file with your credentials:
 ```env
+# Required
 GROQ_API_KEY=your_groq_api_key
 HF_TOKEN=your_huggingface_token
 NEO4J_URI=bolt://localhost:7687
+# OR for Neo4j Aura (recommended):
+# NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=your_password
+
+# Optional - Weaviate for faster vector search (no Docker needed!)
+# Option 1: Weaviate Cloud (Recommended - Free tier available)
+# Get free cluster at: https://console.weaviate.io
+WEAVIATE_URL=https://your-cluster.weaviate.network
+WEAVIATE_API_KEY=your_weaviate_api_key
+
+# Option 2: Local Weaviate (requires Docker)
+# WEAVIATE_URL=http://localhost:8080
+# WEAVIATE_API_KEY=  # Leave empty for local
+
+# Option 3: Skip Weaviate (system uses Neo4j - slower but works)
+# Just don't set WEAVIATE_URL
 ```
 
 ### Required Packages
@@ -84,7 +104,32 @@ langgraph
 sentence-transformers
 numpy
 requests
+streamlit
+weaviate-client  # Optional - for faster vector search
 ```
+
+**Note**: `weaviate-client` is optional. If not installed, the system will use Neo4j for vector search (works but slower).
+
+### Weaviate Setup (Optional - No Docker Needed!)
+
+**Best Option: Weaviate Cloud (WCS) - Free Tier Available**
+
+1. Go to https://console.weaviate.io
+2. Sign up for free account
+3. Create a free cluster
+4. Copy your cluster URL and API key
+5. Add to `.env`:
+   ```env
+   WEAVIATE_URL=https://your-cluster.weaviate.network
+   WEAVIATE_API_KEY=your_api_key
+   ```
+
+**That's it! No Docker needed!**
+
+The system will automatically:
+- Use Weaviate for fast vector search (if configured)
+- Fall back to Neo4j if Weaviate is not available
+- Work perfectly fine without Weaviate (just slower searches)
 
 ## 📖 Usage
 
