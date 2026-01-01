@@ -49,6 +49,8 @@ from groq import Groq
 from neo4j import GraphDatabase
 from langgraph.graph import StateGraph, END
 from sentence_transformers import SentenceTransformer
+import weaviate
+from weaviate.classes.config import Configure, Property, DataType
 
 # Embedding configuration
 EMBEDDING_DIM = 384  # Standardized dimension for all-MiniLM-L6-v2
@@ -71,6 +73,11 @@ def validate_env_vars():
     missing = [var for var in required if not os.getenv(var)]
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    
+    # Weaviate is optional but recommended
+    weaviate_url = os.getenv('WEAVIATE_URL')
+    if not weaviate_url:
+        print("[WARNING] WEAVIATE_URL not set. Vector search will use manual cosine similarity.")
     return True
 
 # Validate on import
@@ -448,6 +455,103 @@ except Exception as e:
     print("   2. Username and password are correct")
     print("   3. Your Aura database is running")
     raise
+
+# ===== WEAVIATE CLIENT INITIALIZATION =====
+weaviate_client = None
+weaviate_available = False
+
+try:
+    weaviate_url = os.getenv('WEAVIATE_URL', 'http://localhost:8080')
+    weaviate_api_key = os.getenv('WEAVIATE_API_KEY')
+    
+    if weaviate_api_key:
+        weaviate_client = weaviate.connect_to_weaviate_cloud(
+            cluster_url=weaviate_url,
+            auth_credentials=weaviate.auth.AuthApiKey(api_key=weaviate_api_key)
+        )
+    else:
+        # Local Weaviate (no auth) - parse URL
+        url_parts = weaviate_url.replace('http://', '').replace('https://', '').split(':')
+        host = url_parts[0] if url_parts else 'localhost'
+        port = int(url_parts[1]) if len(url_parts) > 1 else 8080
+        weaviate_client = weaviate.connect_to_local(host=host, port=port)
+    
+    # Test connection
+    if weaviate_client.is_ready():
+        weaviate_available = True
+        print("[OK] Weaviate connection successful!")
+    else:
+        print("[WARNING] Weaviate connection test failed")
+        weaviate_available = False
+except Exception as e:
+    print(f"[WARNING] Weaviate not available: {e}")
+    print("[INFO] Will use manual cosine similarity in Neo4j as fallback")
+    weaviate_available = False
+
+# ===== WEAVIATE SCHEMA SETUP =====
+def _setup_weaviate_schema():
+    """Create Weaviate collections (classes) for contracts, clauses, and precedents"""
+    if not weaviate_available or not weaviate_client:
+        return
+    
+    try:
+        # Check if Clause collection exists
+        if not weaviate_client.collections.exists("Clause"):
+            weaviate_client.collections.create(
+                name="Clause",
+                vectorizer_config=Configure.Vectorizer.none(),  # We provide our own vectors
+                properties=[
+                    Property(name="clause_id", data_type=DataType.TEXT),
+                    Property(name="contract_id", data_type=DataType.TEXT),
+                    Property(name="contract_title", data_type=DataType.TEXT),
+                    Property(name="clause_name", data_type=DataType.TEXT),
+                    Property(name="summary", data_type=DataType.TEXT),
+                    Property(name="risk_level", data_type=DataType.TEXT),
+                    Property(name="risk_reason", data_type=DataType.TEXT),
+                    Property(name="obligation", data_type=DataType.TEXT),
+                    Property(name="liability", data_type=DataType.TEXT),
+                    Property(name="ai_summary", data_type=DataType.TEXT),
+                ]
+            )
+            print("[OK] Created Weaviate 'Clause' collection")
+        
+        # Check if Contract collection exists
+        if not weaviate_client.collections.exists("Contract"):
+            weaviate_client.collections.create(
+                name="Contract",
+                vectorizer_config=Configure.Vectorizer.none(),  # We provide our own vectors
+                properties=[
+                    Property(name="contract_id", data_type=DataType.TEXT),
+                    Property(name="title", data_type=DataType.TEXT),
+                    Property(name="file_name", data_type=DataType.TEXT),
+                    Property(name="governing_law", data_type=DataType.TEXT),
+                ]
+            )
+            print("[OK] Created Weaviate 'Contract' collection")
+        
+        # Check if Precedent collection exists
+        if not weaviate_client.collections.exists("Precedent"):
+            weaviate_client.collections.create(
+                name="Precedent",
+                vectorizer_config=Configure.Vectorizer.none(),  # We provide our own vectors
+                properties=[
+                    Property(name="precedent_id", data_type=DataType.TEXT),
+                    Property(name="title", data_type=DataType.TEXT),
+                    Property(name="case_name", data_type=DataType.TEXT),
+                    Property(name="court", data_type=DataType.TEXT),
+                    Property(name="date", data_type=DataType.TEXT),
+                    Property(name="summary", data_type=DataType.TEXT),
+                    Property(name="relevant_clauses", data_type=DataType.TEXT_ARRAY),
+                    Property(name="legal_principles", data_type=DataType.TEXT_ARRAY),
+                ]
+            )
+            print("[OK] Created Weaviate 'Precedent' collection")
+    except Exception as e:
+        print(f"[WARNING] Could not setup Weaviate schema: {e}")
+
+# Setup schema if Weaviate is available
+if weaviate_available:
+    _setup_weaviate_schema()
 
 def get_embeddings_api(text):
     """Get embeddings using HuggingFace Inference API"""
@@ -871,6 +975,10 @@ def store_graph_agent(state: ContractState):
     embeddings = state["embeddings"]
 
     print("[STORE] Storing into Neo4j with vector embeddings")
+    
+    # Also store in Weaviate if available
+    if weaviate_available and weaviate_client:
+        print("[STORE] Also storing in Weaviate for vector search")
 
     with neo4j_driver.session() as s:
 
@@ -1063,7 +1171,7 @@ def retrieve_all_contracts():
 
 def search_similar_clauses(query_text, top_k=5):
     """
-    Search for similar clauses using vector embeddings
+    Search for similar clauses using Weaviate vector search (or fallback to Neo4j)
     """
     print(f"\n[SEARCH] Searching for clauses similar to: '{query_text}'")
     
@@ -1078,6 +1186,50 @@ def search_similar_clauses(query_text, top_k=5):
     if isinstance(query_emb[0], list):
         query_emb = query_emb[0]
     
+    # Use Weaviate if available
+    if weaviate_available and weaviate_client:
+        try:
+            clause_collection = weaviate_client.collections.get("Clause")
+            
+            # Perform vector search using Weaviate
+            results = clause_collection.query.near_vector(
+                near_vector=query_emb,
+                limit=top_k,
+                return_metadata=weaviate.classes.query.MetadataQuery(distance=True)
+            )
+            
+            clauses = []
+            for result in results.objects:
+                props = result.properties
+                metadata = result.metadata
+                
+                # Convert distance to similarity (Weaviate returns distance, lower is better)
+                # For cosine distance: similarity = 1 - distance
+                distance = metadata.distance if metadata.distance else 1.0
+                similarity = max(0.0, 1.0 - distance)  # Ensure non-negative
+                
+                clauses.append({
+                    "contract": props.get("contract_title", "Unknown"),
+                    "clause": props.get("clause_name", "Unknown"),
+                    "summary": props.get("summary", ""),
+                    "risk_level": props.get("risk_level", "MEDIUM"),
+                    "similarity": float(similarity)
+                })
+            
+            print(f"\n[STATS] Top {top_k} similar clauses (via Weaviate):")
+            for i, clause in enumerate(clauses, 1):
+                print(f"\n[{i}] Similarity: {clause['similarity']:.4f}")
+                print(f"    Contract: {clause['contract']}")
+                print(f"    Clause: {clause['clause']}")
+                print(f"    Summary: {clause['summary']}")
+            
+            return clauses
+            
+        except Exception as e:
+            print(f"[WARNING] Weaviate search failed: {e}")
+            print("[INFO] Falling back to Neo4j cosine similarity")
+    
+    # Fallback to Neo4j manual cosine similarity
     with neo4j_driver.session() as s:
         # Get all clauses with embeddings
         result = s.run("""
@@ -1111,7 +1263,7 @@ def search_similar_clauses(query_text, top_k=5):
         # Sort by similarity
         clauses.sort(key=lambda x: x["similarity"], reverse=True)
         
-        print(f"\n[STATS] Top {top_k} similar clauses:")
+        print(f"\n[STATS] Top {top_k} similar clauses (via Neo4j fallback):")
         for i, clause in enumerate(clauses[:top_k], 1):
             print(f"\n[{i}] Similarity: {clause['similarity']:.4f}")
             print(f"    Contract: {clause['contract']}")
@@ -1119,6 +1271,114 @@ def search_similar_clauses(query_text, top_k=5):
             print(f"    Summary: {clause['summary']}")
         
         return clauses[:top_k]
+
+# ===== PRECEDENT MATCHING =====
+def match_precedents(clause_text, contract_id=None, top_k=5):
+    """
+    Match a clause with legal precedents using Weaviate vector search
+    Finds similar legal precedents (case law, court decisions) that relate to the clause
+    """
+    print(f"\n[PRECEDENT] Matching clause with legal precedents: '{clause_text[:50]}...'")
+    
+    if not weaviate_available or not weaviate_client:
+        print("[WARNING] Weaviate not available. Precedent matching requires Weaviate.")
+        return []
+    
+    # Generate embedding for clause
+    clause_emb = get_embeddings_api(clause_text)
+    
+    if clause_emb is None:
+        print("[ERROR] Could not generate clause embedding")
+        return []
+    
+    # Normalize if nested
+    if isinstance(clause_emb[0], list):
+        clause_emb = clause_emb[0]
+    
+    try:
+        precedent_collection = weaviate_client.collections.get("Precedent")
+        
+        # Perform vector search for precedents
+        results = precedent_collection.query.near_vector(
+            near_vector=clause_emb,
+            limit=top_k,
+            return_metadata=weaviate.classes.query.MetadataQuery(distance=True)
+        )
+        
+        precedents = []
+        for result in results.objects:
+            props = result.properties
+            metadata = result.metadata
+            
+            # Convert distance to similarity
+            distance = metadata.distance if metadata.distance else 1.0
+            similarity = max(0.0, 1.0 - distance)
+            
+            precedents.append({
+                "precedent_id": props.get("precedent_id", ""),
+                "title": props.get("title", ""),
+                "case_name": props.get("case_name", ""),
+                "court": props.get("court", ""),
+                "date": props.get("date", ""),
+                "summary": props.get("summary", ""),
+                "relevant_clauses": props.get("relevant_clauses", []),
+                "legal_principles": props.get("legal_principles", []),
+                "similarity": float(similarity)
+            })
+        
+        print(f"\n[STATS] Found {len(precedents)} relevant precedents:")
+        for i, prec in enumerate(precedents, 1):
+            print(f"\n[{i}] Similarity: {prec['similarity']:.4f}")
+            print(f"    Case: {prec['case_name']}")
+            print(f"    Court: {prec['court']}")
+            print(f"    Summary: {prec['summary'][:100]}...")
+        
+        return precedents
+        
+    except Exception as e:
+        print(f"[ERROR] Precedent matching failed: {e}")
+        return []
+
+def add_precedent(precedent_id, title, case_name, court, date, summary, 
+                  relevant_clauses=None, legal_principles=None, embedding=None):
+    """
+    Add a legal precedent to Weaviate for matching
+    """
+    if not weaviate_available or not weaviate_client:
+        print("[WARNING] Weaviate not available. Cannot add precedent.")
+        return False
+    
+    if embedding is None:
+        # Generate embedding from summary
+        embedding = get_embeddings_api(summary)
+        if embedding is None:
+            print("[ERROR] Could not generate embedding for precedent")
+            return False
+        
+        if isinstance(embedding[0], list):
+            embedding = embedding[0]
+    
+    try:
+        precedent_collection = weaviate_client.collections.get("Precedent")
+        precedent_collection.data.insert(
+            uuid=precedent_id,
+            properties={
+                "precedent_id": precedent_id,
+                "title": title,
+                "case_name": case_name,
+                "court": court,
+                "date": date,
+                "summary": summary,
+                "relevant_clauses": relevant_clauses or [],
+                "legal_principles": legal_principles or [],
+            },
+            vector=embedding
+        )
+        print(f"[OK] Precedent '{title}' added successfully")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Could not add precedent: {e}")
+        return False
 
 # ===== PROCESS CONTRACTS =====
 # This code is commented out - it should be called from main() or via the web interface

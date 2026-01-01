@@ -30,7 +30,7 @@ with SuppressOutput():
     from legal_contract_analyzer import (
         workflow, pdf_hash, retrieve_all_contracts, retrieve_contract_from_db,
         search_similar_clauses, view_contract_clean_graph, fix_all_risk_levels,
-        validate_and_fix_contract_data
+        validate_and_fix_contract_data, match_precedents, add_precedent
     )
 
 # Page configuration
