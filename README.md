@@ -60,56 +60,6 @@ streamlit run app.py
 
 Open `http://localhost:8501` in your browser.
 
-## 📖 Usage
-
-### Web Interface (Recommended)
-
-**Available Pages**:
-- **Upload & Process**: Upload and analyze PDF contracts
-- **View Contracts**: Browse contracts with export options (Excel/PDF)
-- **Risk Dashboard**: Interactive risk distribution visualizations
-- **Graph Visualization**: Generate Neo4j Cypher queries
-
-### Programmatic Usage
-
-```python
-from legal_contract_analyzer import workflow, pdf_hash, retrieve_contract_from_db
-
-# Process contract
-cid = pdf_hash("contract.pdf")
-workflow.invoke({
-    "pdf_path": "contract.pdf",
-    "cid": cid,
-    "text": "",
-    "embeddings": [],
-    "analysis": {},
-})
-
-# Retrieve contract
-contract_data = retrieve_contract_from_db(cid)
-```
-
-## 🔍 Extracted Information
-
-For each contract:
-- **Basic Info**: Title, Contract ID, File Name, Governing Law
-- **Parties**: Names and roles
-- **Important Dates**: Effective, expiration, and other critical dates
-- **Clause Analysis**: Name, summary, risk level (LOW/MEDIUM/HIGH), risk reason, obligations, liabilities, AI summary
-
-## 📊 Risk Levels
-
-- **HIGH**: Unfavorable termination, unlimited liability, strict penalties, one-sided terms
-- **MEDIUM**: Standard legal language, moderate obligations, typical industry terms
-- **LOW**: Favorable terms, standard protections, reasonable conditions
-
-## 📈 Features
-
-- **Export**: Download contract summaries as Excel or PDF
-- **Risk Dashboard**: Interactive charts showing risk distribution
-- **Graph Visualization**: Generate Neo4j Cypher queries
-- **Vector Search**: Find similar clauses using embeddings
-
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -174,73 +124,9 @@ NEO4J_PASSWORD=your_password
 - **Embedding**: `sentence-transformers/all-MiniLM-L6-v2` (384 dims)
 - **LLM**: Groq `llama-3.1-8b-instant`
 
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## ⚠️ Disclaimer
 
 This tool is for informational purposes only and does not constitute legal advice. Always consult with a qualified attorney for legal matters.
-
-## 🚀 Quick Start Guide
-
-1. **Clone the repository**:
-```bash
-git clone https://github.com/11Saniyaa/Legal_contract_analyzer.git
-cd legal_contract_analyzer
-```
-
-2. **Set up virtual environment** (recommended):
-```bash
-python -m venv .venv
-.venv\Scripts\Activate.ps1  # Windows
-# or
-source .venv/bin/activate   # Linux/Mac
-```
-
-3. **Install dependencies**:
-```bash
-pip install -r requirement.txt
-```
-
-4. **Configure environment**:
-   - Create `.env` file with your API keys and Neo4j credentials
-   - See Configuration section above for details
-
-5. **Run the application**:
-```bash
-streamlit run app.py
-```
-
-6. **Access the interface**:
-   - Open browser to `http://localhost:8501`
-   - Upload a PDF contract and start analyzing!
-
-## 🙏 Acknowledgments
-
-- **LangGraph** - Workflow orchestration
-- **Neo4j** - Graph database
-- **Groq** - Fast LLM inference
-- **HuggingFace** - Embedding models
-- **PyMuPDF** - PDF text extraction
-- **Streamlit** - Web interface framework
-- **Plotly** - Interactive visualizations
-- **Pandas** - Data manipulation
-- **ReportLab** - PDF generation
-
-## 📧 Contact
-
-For questions or support, please open an issue on GitHub.
 
 ---
 
