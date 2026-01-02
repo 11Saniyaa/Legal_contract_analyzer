@@ -9,6 +9,15 @@ import sys
 import tempfile
 import io
 from contextlib import redirect_stdout, redirect_stderr
+import pandas as pd
+from datetime import datetime
+import plotly.express as px
+import plotly.graph_objects as go
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib import colors
 
 # Suppress print statements from imported module
 class SuppressOutput:
@@ -68,6 +77,140 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Helper functions for export
+def export_to_excel(contract_data):
+    """Export contract data to Excel format"""
+    data = {
+        'Clause Name': [],
+        'Summary': [],
+        'Risk Level': [],
+        'Risk Reason': [],
+        'Obligation': [],
+        'Liability': [],
+        'AI Summary': []
+    }
+    
+    for clause in contract_data.get('clauses', []):
+        risk_level = clause.get('risk_level', 'MEDIUM')
+        if isinstance(risk_level, str):
+            risk_level = risk_level.strip().upper()
+        
+        data['Clause Name'].append(clause.get('clause_name', 'N/A'))
+        data['Summary'].append(clause.get('summary', 'N/A'))
+        data['Risk Level'].append(risk_level)
+        data['Risk Reason'].append(clause.get('risk_reason', 'N/A'))
+        data['Obligation'].append(clause.get('obligation', 'N/A'))
+        data['Liability'].append(clause.get('liability', 'N/A'))
+        data['AI Summary'].append(clause.get('ai_summary', 'N/A'))
+    
+    df = pd.DataFrame(data)
+    
+    # Create Excel file in memory
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Contract info sheet
+        info_df = pd.DataFrame({
+            'Field': ['Title', 'File Name', 'Contract ID', 'Governing Law', 'Parties', 'Important Dates'],
+            'Value': [
+                contract_data.get('title', 'N/A'),
+                contract_data.get('file_name', 'N/A'),
+                contract_data.get('contract_id', 'N/A')[:30] + '...',
+                contract_data.get('governing_law', 'N/A'),
+                ', '.join(contract_data.get('parties', [])),
+                ', '.join(contract_data.get('dates', []))
+            ]
+        })
+        info_df.to_excel(writer, sheet_name='Contract Info', index=False)
+        
+        # Clauses sheet
+        df.to_excel(writer, sheet_name='Clauses', index=False)
+    
+    output.seek(0)
+    return output
+
+def export_to_pdf(contract_data):
+    """Export contract data to PDF format"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor('#1f77b4'),
+        spaceAfter=30
+    )
+    story.append(Paragraph("Contract Analysis Report", title_style))
+    story.append(Spacer(1, 12))
+    
+    # Contract Information
+    story.append(Paragraph("Contract Information", styles['Heading2']))
+    info_data = [
+        ['Field', 'Value'],
+        ['Title', contract_data.get('title', 'N/A')],
+        ['File Name', contract_data.get('file_name', 'N/A')],
+        ['Contract ID', contract_data.get('contract_id', 'N/A')[:30] + '...'],
+        ['Governing Law', contract_data.get('governing_law', 'N/A')],
+        ['Parties', ', '.join(contract_data.get('parties', []))],
+        ['Important Dates', ', '.join(contract_data.get('dates', []))]
+    ]
+    info_table = Table(info_data, colWidths=[2*inch, 4*inch])
+    info_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 20))
+    story.append(PageBreak())
+    
+    # Clauses
+    story.append(Paragraph("Clause Analysis", styles['Heading2']))
+    for i, clause in enumerate(contract_data.get('clauses', []), 1):
+        risk_level = clause.get('risk_level', 'MEDIUM')
+        if isinstance(risk_level, str):
+            risk_level = risk_level.strip().upper()
+        
+        story.append(Paragraph(f"Clause {i}: {clause.get('clause_name', 'Unnamed')}", styles['Heading3']))
+        story.append(Spacer(1, 6))
+        
+        clause_data = [
+            ['Field', 'Value'],
+            ['Summary', clause.get('summary', 'N/A')],
+            ['Risk Level', risk_level],
+            ['Risk Reason', clause.get('risk_reason', 'N/A')],
+            ['Obligation', clause.get('obligation', 'N/A')],
+            ['Liability', clause.get('liability', 'N/A')],
+            ['AI Summary', clause.get('ai_summary', 'N/A')]
+        ]
+        clause_table = Table(clause_data, colWidths=[1.5*inch, 4.5*inch])
+        clause_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')
+        ]))
+        story.append(clause_table)
+        story.append(Spacer(1, 12))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 # Title
 st.markdown('<h1 class="main-header">⚖️ Legal Contract Analyzer</h1>', unsafe_allow_html=True)
 st.markdown("---")
@@ -77,7 +220,7 @@ with st.sidebar:
     st.header("Navigation")
     page = st.radio(
         "Choose a page:",
-        ["Upload & Process", "View Contracts", "Graph Visualization"]
+        ["Upload & Process", "View Contracts", "Risk Dashboard", "Graph Visualization"]
     )
     st.markdown("---")
     st.info("💡 Make sure your .env file is configured with API keys")
@@ -179,6 +322,29 @@ elif page == "View Contracts":
                             contract_data = retrieve_contract_from_db(contract_id)
                         
                         if contract_data:
+                            st.session_state['current_contract_data'] = contract_data
+                            
+                            # Export buttons
+                            col_export1, col_export2 = st.columns(2)
+                            with col_export1:
+                                excel_data = export_to_excel(contract_data)
+                                st.download_button(
+                                    label="📊 Export to Excel",
+                                    data=excel_data,
+                                    file_name=f"contract_{contract_data.get('file_name', 'export')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            with col_export2:
+                                pdf_data = export_to_pdf(contract_data)
+                                st.download_button(
+                                    label="📄 Export to PDF",
+                                    data=pdf_data,
+                                    file_name=f"contract_{contract_data.get('file_name', 'export')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf"
+                                )
+                            
+                            st.markdown("---")
+                            
                             # Display contract information
                             col1, col2 = st.columns(2)
                             
@@ -238,6 +404,153 @@ elif page == "View Contracts":
                                         
     except Exception as e:
         st.error(f"Error loading contracts: {str(e)}")
+
+elif page == "Risk Dashboard":
+    st.header("📊 Risk Dashboard")
+    st.write("Visualize risk distribution across all contracts")
+    
+    try:
+        with SuppressOutput():
+            contracts = retrieve_all_contracts()
+        
+        if not contracts:
+            st.warning("No contracts found. Process a contract first!")
+        else:
+            # Collect all clauses from all contracts
+            all_clauses = []
+            contract_clause_map = {}
+            
+            with st.spinner("Loading contract data..."):
+                for contract in contracts:
+                    with SuppressOutput():
+                        contract_data = retrieve_contract_from_db(contract['id'])
+                    
+                    if contract_data and contract_data.get('clauses'):
+                        for clause in contract_data['clauses']:
+                            risk_level = clause.get('risk_level', 'MEDIUM')
+                            if isinstance(risk_level, str):
+                                risk_level = risk_level.strip().upper()
+                            
+                            clause_info = {
+                                'Contract': contract_data.get('title', 'Unknown'),
+                                'Clause': clause.get('clause_name', 'Unnamed'),
+                                'Risk Level': risk_level,
+                                'Summary': clause.get('summary', 'N/A')
+                            }
+                            all_clauses.append(clause_info)
+                            
+                            if contract['id'] not in contract_clause_map:
+                                contract_clause_map[contract['id']] = {
+                                    'title': contract_data.get('title', 'Unknown'),
+                                    'clauses': []
+                                }
+                            contract_clause_map[contract['id']]['clauses'].append(clause_info)
+            
+            if not all_clauses:
+                st.warning("No clauses found in contracts.")
+            else:
+                df = pd.DataFrame(all_clauses)
+                
+                # Risk distribution pie chart
+                st.subheader("🎯 Overall Risk Distribution")
+                risk_counts = df['Risk Level'].value_counts()
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Pie chart
+                    fig_pie = px.pie(
+                        values=risk_counts.values,
+                        names=risk_counts.index,
+                        title="Risk Level Distribution",
+                        color_discrete_map={
+                            'HIGH': '#d32f2f',
+                            'MEDIUM': '#f57c00',
+                            'LOW': '#388e3c'
+                        }
+                    )
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                with col2:
+                    # Bar chart
+                    fig_bar = px.bar(
+                        x=risk_counts.index,
+                        y=risk_counts.values,
+                        title="Risk Level Count",
+                        labels={'x': 'Risk Level', 'y': 'Number of Clauses'},
+                        color=risk_counts.index,
+                        color_discrete_map={
+                            'HIGH': '#d32f2f',
+                            'MEDIUM': '#f57c00',
+                            'LOW': '#388e3c'
+                        }
+                    )
+                    fig_bar.update_layout(showlegend=False)
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                
+                # Risk distribution by contract
+                st.subheader("📋 Risk Distribution by Contract")
+                
+                contract_risk_data = []
+                for contract_id, contract_info in contract_clause_map.items():
+                    contract_df = pd.DataFrame(contract_info['clauses'])
+                    risk_counts = contract_df['Risk Level'].value_counts().to_dict()
+                    contract_risk_data.append({
+                        'Contract': contract_info['title'],
+                        'HIGH': risk_counts.get('HIGH', 0),
+                        'MEDIUM': risk_counts.get('MEDIUM', 0),
+                        'LOW': risk_counts.get('LOW', 0),
+                        'Total': len(contract_info['clauses'])
+                    })
+                
+                contract_risk_df = pd.DataFrame(contract_risk_data)
+                
+                if len(contract_risk_df) > 0:
+                    fig_contract = go.Figure()
+                    fig_contract.add_trace(go.Bar(
+                        name='HIGH',
+                        x=contract_risk_df['Contract'],
+                        y=contract_risk_df['HIGH'],
+                        marker_color='#d32f2f'
+                    ))
+                    fig_contract.add_trace(go.Bar(
+                        name='MEDIUM',
+                        x=contract_risk_df['Contract'],
+                        y=contract_risk_df['MEDIUM'],
+                        marker_color='#f57c00'
+                    ))
+                    fig_contract.add_trace(go.Bar(
+                        name='LOW',
+                        x=contract_risk_df['Contract'],
+                        y=contract_risk_df['LOW'],
+                        marker_color='#388e3c'
+                    ))
+                    fig_contract.update_layout(
+                        barmode='stack',
+                        title="Risk Distribution by Contract",
+                        xaxis_title="Contract",
+                        yaxis_title="Number of Clauses",
+                        height=400
+                    )
+                    st.plotly_chart(fig_contract, use_container_width=True)
+                    
+                    # Summary table
+                    st.subheader("📊 Summary Statistics")
+                    st.dataframe(contract_risk_df, use_container_width=True)
+                
+                # High-risk clauses table
+                high_risk_clauses = df[df['Risk Level'] == 'HIGH']
+                if len(high_risk_clauses) > 0:
+                    st.subheader("🚨 High-Risk Clauses")
+                    st.dataframe(
+                        high_risk_clauses[['Contract', 'Clause', 'Summary']],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                
+    except Exception as e:
+        st.error(f"Error loading dashboard: {str(e)}")
 
 elif page == "Graph Visualization":
     st.header("📊 Graph Visualization")
