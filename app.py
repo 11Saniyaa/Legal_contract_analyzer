@@ -41,6 +41,31 @@ with SuppressOutput():
         view_contract_clean_graph
     )
 
+# Cached wrapper for retrieve_all_contracts to improve performance
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_contracts():
+    """Cached version of retrieve_all_contracts to avoid repeated database queries"""
+    with SuppressOutput():
+        return retrieve_all_contracts()
+
+# Helper function to get cached contract data
+def get_cached_contract_data(contract_id):
+    """Get contract data with session state caching"""
+    cache_key = f'contract_data_{contract_id}'
+    
+    # Check if data is in session state
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    
+    # Fetch from database and cache
+    with SuppressOutput():
+        contract_data = retrieve_contract_from_db(contract_id)
+    
+    if contract_data:
+        st.session_state[cache_key] = contract_data
+    
+    return contract_data
+
 # Page configuration
 st.set_page_config(
     page_title="Legal Contract Analyzer",
@@ -295,10 +320,9 @@ if page == "Upload & Process":
 elif page == "View Contracts":
     st.header("📚 View Stored Contracts")
     
-    # Get all contracts
+    # Get all contracts (using cached version)
     try:
-        with SuppressOutput():
-            contracts = retrieve_all_contracts()
+        contracts = get_cached_contracts()
         
         if not contracts:
             st.warning("No contracts found in database.")
@@ -318,8 +342,7 @@ elif page == "View Contracts":
                 
                 if st.button("View Contract Details"):
                     with st.spinner("Loading contract details..."):
-                        with SuppressOutput():
-                            contract_data = retrieve_contract_from_db(contract_id)
+                        contract_data = get_cached_contract_data(contract_id)
                         
                         if contract_data:
                             st.session_state['current_contract_data'] = contract_data
@@ -414,7 +437,12 @@ elif page == "Risk Dashboard":
         st.write("Visualize risk distribution across all contracts")
     with col_header2:
         if st.button("🔄 Refresh Data", use_container_width=True):
-            # Clear cache and rerun
+            # Clear all caches and rerun
+            get_cached_contracts.clear()  # Clear Streamlit cache
+            # Clear session state contract data cache
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith('contract_data_')]
+            for key in keys_to_remove:
+                del st.session_state[key]
             if 'dashboard_last_updated' in st.session_state:
                 del st.session_state['dashboard_last_updated']
             st.rerun()
@@ -426,8 +454,7 @@ elif page == "Risk Dashboard":
             st.caption(f"Last updated: {st.session_state['dashboard_last_updated']}")
     
     try:
-        with SuppressOutput():
-            contracts = retrieve_all_contracts()
+        contracts = get_cached_contracts()
         
         if not contracts:
             st.warning("No contracts found. Process a contract first!")
@@ -438,8 +465,7 @@ elif page == "Risk Dashboard":
             
             with st.spinner("Loading contract data..."):
                 for contract in contracts:
-                    with SuppressOutput():
-                        contract_data = retrieve_contract_from_db(contract['id'])
+                    contract_data = get_cached_contract_data(contract['id'])
                     
                     if contract_data and contract_data.get('clauses'):
                         for clause in contract_data['clauses']:
@@ -669,8 +695,7 @@ elif page == "Graph Visualization":
     st.write("View contract graphs in Neo4j Browser")
     
     try:
-        with SuppressOutput():
-            contracts = retrieve_all_contracts()
+        contracts = get_cached_contracts()
         
         if not contracts:
             st.warning("No contracts found. Process a contract first!")
