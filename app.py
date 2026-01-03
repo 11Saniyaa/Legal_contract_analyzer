@@ -303,8 +303,11 @@ if page == "Upload & Process":
                     st.success(f"✅ Contract processed successfully!")
                     st.info(f"Contract ID: {cid[:30]}...")
                     
-                    # Show summary
-                    contract_data = retrieve_contract_from_db(cid)
+                    # Clear cache to show new contract
+                    get_cached_contracts.clear()
+                    
+                    # Show summary (use cached version)
+                    contract_data = get_cached_contract_data(cid)
                     if contract_data:
                         st.session_state['last_contract_id'] = cid
                         st.session_state['last_contract_data'] = contract_data
