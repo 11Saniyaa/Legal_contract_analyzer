@@ -41,7 +41,7 @@ python -m venv .venv
 
 2. **Install dependencies**:
 ```bash
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 3. **Configure environment** - Create `.env` file:
@@ -67,7 +67,6 @@ Open `http://localhost:8501` in your browser.
 Create a `.env` file in the project root:
 
 ```env
-# Required
 GROQ_API_KEY=your_groq_api_key
 HF_TOKEN=your_huggingface_token
 NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
@@ -75,22 +74,9 @@ NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=your_password
 ```
 
-### Embedding Model
-
-The system uses `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions) via HuggingFace API. To change models, update in `legal_contract_analyzer.py`:
-
-```python
-HF_EMBED_MODEL = "sentence-transformers/your-preferred-model"
-EMBEDDING_DIM = 384  # Update if using different model
-```
-
-### LLM Model
-
-Currently uses Groq's `llama-3.1-8b-instant`. Modify in `legal_contract_analyzer.py`:
-
-```python
-GROQ_MODEL = "llama-3.1-8b-instant"  # Change as needed
-```
+### Models
+- **Embedding**: `sentence-transformers/all-MiniLM-L6-v2` (384 dims)
+- **LLM**: Groq `llama-3.1-8b-instant`
 
 ### Retry Configuration
 
@@ -108,21 +94,6 @@ RETRY_DELAY = 1  # seconds
 - JSON parsing with multiple fallback strategies
 - Automatic risk level normalization
 - Neo4j connection reconnection handling
-
-## 🔧 Configuration
-
-### Environment Variables (.env)
-```env
-GROQ_API_KEY=your_key
-HF_TOKEN=your_token
-NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=your_password
-```
-
-### Models
-- **Embedding**: `sentence-transformers/all-MiniLM-L6-v2` (384 dims)
-- **LLM**: Groq `llama-3.1-8b-instant`
 
 ## ⚠️ Disclaimer
 
