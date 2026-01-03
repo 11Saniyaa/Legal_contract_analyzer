@@ -407,7 +407,23 @@ elif page == "View Contracts":
 
 elif page == "Risk Dashboard":
     st.header("📊 Risk Dashboard")
-    st.write("Visualize risk distribution across all contracts")
+    
+    # Header with refresh button and timestamp
+    col_header1, col_header2, col_header3 = st.columns([2, 1, 1])
+    with col_header1:
+        st.write("Visualize risk distribution across all contracts")
+    with col_header2:
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            # Clear cache and rerun
+            if 'dashboard_last_updated' in st.session_state:
+                del st.session_state['dashboard_last_updated']
+            st.rerun()
+    with col_header3:
+        if 'dashboard_last_updated' in st.session_state:
+            st.caption(f"Last updated: {st.session_state['dashboard_last_updated']}")
+        else:
+            st.session_state['dashboard_last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.caption(f"Last updated: {st.session_state['dashboard_last_updated']}")
     
     try:
         with SuppressOutput():
@@ -446,6 +462,9 @@ elif page == "Risk Dashboard":
                                 }
                             contract_clause_map[contract['id']]['clauses'].append(clause_info)
             
+            # Update timestamp after loading
+            st.session_state['dashboard_last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             if not all_clauses:
                 st.warning("No clauses found in contracts.")
             else:
@@ -471,6 +490,30 @@ elif page == "Risk Dashboard":
                     )
                     fig_pie.update_traces(textposition='inside', textinfo='percent+label')
                     st.plotly_chart(fig_pie, use_container_width=True)
+                    
+                    # Export pie chart
+                    col_export1, col_export2 = st.columns(2)
+                    with col_export1:
+                        pie_html = fig_pie.to_html()
+                        st.download_button(
+                            label="📥 Export as HTML",
+                            data=pie_html,
+                            file_name=f"risk_pie_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                            mime="text/html",
+                            use_container_width=True
+                        )
+                    with col_export2:
+                        try:
+                            pie_png = fig_pie.to_image(format="png")
+                            st.download_button(
+                                label="📥 Export as PNG",
+                                data=pie_png,
+                                file_name=f"risk_pie_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                        except:
+                            st.info("PNG export requires kaleido. Install: pip install kaleido")
                 
                 with col2:
                     # Bar chart
@@ -488,6 +531,30 @@ elif page == "Risk Dashboard":
                     )
                     fig_bar.update_layout(showlegend=False)
                     st.plotly_chart(fig_bar, use_container_width=True)
+                    
+                    # Export bar chart
+                    col_export3, col_export4 = st.columns(2)
+                    with col_export3:
+                        bar_html = fig_bar.to_html()
+                        st.download_button(
+                            label="📥 Export as HTML",
+                            data=bar_html,
+                            file_name=f"risk_bar_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                            mime="text/html",
+                            use_container_width=True
+                        )
+                    with col_export4:
+                        try:
+                            bar_png = fig_bar.to_image(format="png")
+                            st.download_button(
+                                label="📥 Export as PNG",
+                                data=bar_png,
+                                file_name=f"risk_bar_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                        except:
+                            st.info("PNG export requires kaleido")
                 
                 # Risk distribution by contract
                 st.subheader("📋 Risk Distribution by Contract")
@@ -535,9 +602,43 @@ elif page == "Risk Dashboard":
                     )
                     st.plotly_chart(fig_contract, use_container_width=True)
                     
+                    # Export contract chart
+                    col_export5, col_export6 = st.columns(2)
+                    with col_export5:
+                        contract_html = fig_contract.to_html()
+                        st.download_button(
+                            label="📥 Export Chart as HTML",
+                            data=contract_html,
+                            file_name=f"risk_by_contract_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                            mime="text/html",
+                            use_container_width=True
+                        )
+                    with col_export6:
+                        try:
+                            contract_png = fig_contract.to_image(format="png")
+                            st.download_button(
+                                label="📥 Export Chart as PNG",
+                                data=contract_png,
+                                file_name=f"risk_by_contract_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                        except:
+                            st.info("PNG export requires kaleido")
+                    
                     # Summary table
                     st.subheader("📊 Summary Statistics")
                     st.dataframe(contract_risk_df, use_container_width=True)
+                    
+                    # Export summary table as CSV
+                    csv_data = contract_risk_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Export Summary Table as CSV",
+                        data=csv_data,
+                        file_name=f"risk_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
                 
                 # High-risk clauses table
                 high_risk_clauses = df[df['Risk Level'] == 'HIGH']
@@ -547,6 +648,16 @@ elif page == "Risk Dashboard":
                         high_risk_clauses[['Contract', 'Clause', 'Summary']],
                         use_container_width=True,
                         hide_index=True
+                    )
+                    
+                    # Export high-risk clauses as CSV
+                    high_risk_csv = high_risk_clauses[['Contract', 'Clause', 'Summary']].to_csv(index=False)
+                    st.download_button(
+                        label="📥 Export High-Risk Clauses as CSV",
+                        data=high_risk_csv,
+                        file_name=f"high_risk_clauses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
                     )
                 
     except Exception as e:
