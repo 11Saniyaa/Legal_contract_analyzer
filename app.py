@@ -38,11 +38,11 @@ class SuppressOutput:
 with SuppressOutput():
     from legal_contract_analyzer import (
         workflow, pdf_hash, retrieve_all_contracts, retrieve_contract_from_db,
-        view_contract_clean_graph
+        view_contract_clean_graph, neo4j_driver, weaviate_client, setup_weaviate_schema
     )
 
 # Cached wrapper for retrieve_all_contracts to improve performance
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=60)  # Cache for 1 minute (reduced to show new contracts faster)
 def get_cached_contracts():
     """Cached version of retrieve_all_contracts to avoid repeated database queries"""
     with SuppressOutput():
@@ -269,8 +269,13 @@ if page == "Upload & Process":
         if st.button("🚀 Process Contract", type="primary"):
             with st.spinner("Processing contract... This may take a few minutes."):
                 try:
-                    # Generate contract ID
-                    cid = pdf_hash(tmp_path)
+                    # Generate contract ID (include filename to make it unique per upload)
+                    file_hash = pdf_hash(tmp_path)
+                    filename = uploaded_file.name if uploaded_file else os.path.basename(tmp_path)
+                    # Combine hash + filename hash to ensure uniqueness
+                    import hashlib
+                    filename_hash = hashlib.sha256(filename.encode()).hexdigest()[:16]
+                    cid = f"{file_hash}_{filename_hash}"
                     
                     # Process contract with progress
                     progress_bar = st.progress(0)
@@ -300,21 +305,53 @@ if page == "Upload & Process":
                     progress_bar.progress(100)
                     status_text.text("✅ Processing complete!")
                     
-                    st.success(f"✅ Contract processed successfully!")
-                    st.info(f"Contract ID: {cid[:30]}...")
+                    # Check if workflow completed successfully
+                    if result and result.get("analysis"):
+                        st.success(f"✅ Contract processed successfully!")
+                        st.info(f"Contract ID: {cid[:30]}...")
+                        
+                        # Clear ALL caches to show new contract
+                        get_cached_contracts.clear()
+                        # Clear session state cache
+                        keys_to_clear = [key for key in st.session_state.keys() if key.startswith('contract_data_')]
+                        for key in keys_to_clear:
+                            del st.session_state[key]
+                        
+                        # Small delay to ensure Neo4j transaction is committed
+                        import time
+                        time.sleep(0.5)
+                        
+                        # Verify contract was stored
+                        try:
+                            # Force fresh retrieval (bypass cache)
+                            with SuppressOutput():
+                                contract_data = retrieve_contract_from_db(cid)
+                            if contract_data:
+                                st.success("✅ Contract stored in database!")
+                                st.info(f"📄 File: {contract_data.get('file_name', 'N/A')}")
+                                st.info(f"📋 Title: {contract_data.get('title', 'N/A')}")
+                                st.session_state['last_contract_id'] = cid
+                                st.session_state['last_contract_data'] = contract_data
+                                
+                                # Force rerun to show in View Contracts
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ Contract processed but not found in database.")
+                                st.info("💡 This might be a timing issue. Go to 'View Contracts' and click '🔄 Refresh'")
+                        except Exception as db_error:
+                            st.warning(f"⚠️ Could not verify storage: {str(db_error)}")
+                            st.info("💡 The contract may still be stored. Go to 'View Contracts' and click '🔄 Refresh'")
+                    else:
+                        st.error("❌ Contract processing may have failed. Check the output above.")
                     
-                    # Clear cache to show new contract
-                    get_cached_contracts.clear()
-                    
-                    # Show summary (use cached version)
-                    contract_data = get_cached_contract_data(cid)
-                    if contract_data:
-                        st.session_state['last_contract_id'] = cid
-                        st.session_state['last_contract_data'] = contract_data
-                        st.rerun()
-                    
+                except ConnectionError as e:
+                    st.error(f"❌ **Database Connection Error:** {str(e)}")
+                    st.warning("**The contract was NOT stored.** Please fix Neo4j connection and try again.")
                 except Exception as e:
                     st.error(f"❌ Error processing contract: {str(e)}")
+                    import traceback
+                    with st.expander("🔍 Show detailed error"):
+                        st.code(traceback.format_exc())
                 finally:
                     # Clean up temp file
                     if os.path.exists(tmp_path):
@@ -323,18 +360,116 @@ if page == "Upload & Process":
 elif page == "View Contracts":
     st.header("📚 View Stored Contracts")
     
+    # Refresh button and test connection
+    col_refresh, col_test, col_info = st.columns([1, 1, 3])
+    with col_refresh:
+        if st.button("🔄 Refresh", help="Clear cache and reload contracts"):
+            get_cached_contracts.clear()
+            # Clear session state cache
+            keys_to_clear = [key for key in st.session_state.keys() if key.startswith('contract_data_')]
+            for key in keys_to_clear:
+                del st.session_state[key]
+            st.rerun()
+    with col_test:
+        if st.button("🔍 Test DB", help="Test Neo4j and Weaviate connections"):
+            with SuppressOutput():
+                col_test1, col_test2 = st.columns(2)
+                
+                with col_test1:
+                    st.write("**Neo4j:**")
+                    try:
+                        if neo4j_driver:
+                            neo4j_driver.verify_connectivity()
+                            with neo4j_driver.session() as s:
+                                result = s.run("MATCH (c:Contract) RETURN count(c) as count")
+                                count = result.single()["count"]
+                            st.success(f"✅ {count} contract(s)")
+                        else:
+                            st.error("❌ Not connected")
+                    except Exception as e:
+                        st.error(f"❌ {str(e)[:30]}")
+                
+                with col_test2:
+                    st.write("**Weaviate:**")
+                    try:
+                        if weaviate_client:
+                            schema = weaviate_client.schema.get()
+                            classes = [c.get('class', '') for c in schema.get('classes', [])]
+                            if 'ContractClause' in classes:
+                                result = weaviate_client.query.aggregate("ContractClause").with_meta_count().do()
+                                count = result.get('data', {}).get('Aggregate', {}).get('ContractClause', [{}])[0].get('meta', {}).get('count', 0)
+                                st.success(f"✅ {count} clause(s)")
+                            else:
+                                st.warning("⚠️ No schema")
+                        else:
+                            st.error("❌ Not connected")
+                    except Exception as e:
+                        st.error(f"❌ {str(e)[:30]}")
+    
+    # Debug: Show connection status
+    col_neo4j, col_weaviate = st.columns(2)
+    
+    with col_neo4j:
+        with SuppressOutput():
+            if neo4j_driver is None:
+                st.error("❌ **Neo4j: Not Connected**")
+                st.warning("Contracts cannot be stored without Neo4j.")
+            else:
+                try:
+                    neo4j_driver.verify_connectivity()
+                    st.success("✅ **Neo4j: Connected**")
+                except Exception as conn_error:
+                    st.error(f"❌ **Neo4j: Failed**")
+                    st.caption(str(conn_error)[:50])
+    
+    with col_weaviate:
+        with SuppressOutput():
+            if weaviate_client is None:
+                st.warning("⚠️ **Weaviate: Not Connected**")
+                st.caption("Vector search will use Neo4j")
+            else:
+                try:
+                    schema = weaviate_client.schema.get()
+                    classes = [c.get('class', '') for c in schema.get('classes', [])]
+                    if 'ContractClause' in classes:
+                        # Count objects
+                        result = weaviate_client.query.aggregate("ContractClause").with_meta_count().do()
+                        count = result.get('data', {}).get('Aggregate', {}).get('ContractClause', [{}])[0].get('meta', {}).get('count', 0)
+                        st.success(f"✅ **Weaviate: Connected**")
+                        st.caption(f"Schema: ContractClause ({count} clauses)")
+                    else:
+                        st.warning("⚠️ **Weaviate: Connected (No Schema)**")
+                        st.caption("Schema will be created on first upload")
+                except Exception as w_error:
+                    st.error(f"❌ **Weaviate: Error**")
+                    st.caption(str(w_error)[:50])
+    
+    st.markdown("---")
+    
     # Get all contracts (using cached version)
     try:
         contracts = get_cached_contracts()
         
         if not contracts:
             st.warning("No contracts found in database.")
-            st.info("Upload and process a contract first!")
+            st.info("💡 **Tips:**")
+            st.info("1. Make sure you've uploaded and processed a contract in the 'Upload & Process' page")
+            st.info("2. Check that Neo4j database is connected (see status above)")
+            st.info("3. Click '🔄 Refresh' to reload contracts")
+            st.info("4. If you just processed a contract, wait a few seconds and refresh")
         else:
             st.success(f"Found {len(contracts)} contract(s) in database")
             
-            # Contract selector
-            contract_options = {f"{c['file_name']} - {c['title']}": c['id'] for c in contracts}
+            # Show contract IDs for debugging
+            with st.expander("🔍 Debug: Show all contract IDs"):
+                for i, c in enumerate(contracts, 1):
+                    st.write(f"{i}. **{c['file_name']}** - {c['title']}")
+                    st.caption(f"   ID: `{c['id'][:50]}...`")
+            
+            # Contract selector - show most recent first
+            # Sort by file_name to show latest (or you could add timestamp if available)
+            contracts_sorted = sorted(contracts, key=lambda x: x.get('file_name', ''), reverse=True)
+            contract_options = {f"{c['file_name']} - {c['title']}": c['id'] for c in contracts_sorted}
             selected_contract = st.selectbox(
                 "Select a contract to view:",
                 options=list(contract_options.keys())
@@ -427,9 +562,18 @@ elif page == "View Contracts":
                                         st.write(f"**Obligation:** {clause.get('obligation', 'N/A')}")
                                         st.write(f"**Liability:** {clause.get('liability', 'N/A')}")
                                         st.write(f"**AI Summary:** {clause.get('ai_summary', 'N/A')}")
-                                        
+                        else:
+                            st.error("Could not load contract details. Please try again.")
+    except ConnectionError as e:
+        st.error(f"❌ **Database Connection Error:** {str(e)}")
+        st.warning("**Please check:**")
+        st.warning("1. Your Neo4j database is running and accessible")
+        st.warning("2. Your `.env` file has correct `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`")
+        st.warning("3. Your internet connection is working")
+        st.info("💡 Try clicking '🔄 Refresh' after fixing the connection.")
     except Exception as e:
-        st.error(f"Error loading contracts: {str(e)}")
+        st.error(f"❌ **Error retrieving contracts:** {str(e)}")
+        st.info("💡 Try clicking '🔄 Refresh' to retry.")
 
 elif page == "Risk Dashboard":
     st.header("📊 Risk Dashboard")
