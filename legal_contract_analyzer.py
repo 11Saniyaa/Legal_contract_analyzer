@@ -1019,6 +1019,11 @@ def store_graph_agent(state: ContractState):
     embeddings = state["embeddings"]
 
     print("[STORE] Storing into Neo4j with vector embeddings")
+    
+    if neo4j_driver is None:
+        error_msg = "Neo4j driver is not connected. Cannot store contract."
+        print(f"[ERROR] {error_msg}")
+        raise ConnectionError(error_msg)
 
     with neo4j_driver.session() as s:
 
@@ -1216,22 +1221,30 @@ def retrieve_all_contracts():
     """
     print("\n[BOOK] Retrieving all contracts...")
     
-    with neo4j_driver.session() as s:
-        result = s.run("""
-        MATCH (c:Contract)
-        RETURN c.id as id, c.title as title, c.file_name as file_name
-        """)
-        
-        contracts = []
-        for record in result:
-            contracts.append({
-                "id": record["id"],
-                "title": record["title"],
-                "file_name": record["file_name"]
-            })
-        
-        print(f"[OK] Found {len(contracts)} contracts")
-        return contracts
+    if neo4j_driver is None:
+        print("[ERROR] Neo4j driver is not connected. Cannot retrieve contracts.")
+        raise ConnectionError("Neo4j database is not connected. Please check your connection settings.")
+    
+    try:
+        with neo4j_driver.session() as s:
+            result = s.run("""
+            MATCH (c:Contract)
+            RETURN c.id as id, c.title as title, c.file_name as file_name
+            """)
+            
+            contracts = []
+            for record in result:
+                contracts.append({
+                    "id": record["id"],
+                    "title": record["title"],
+                    "file_name": record["file_name"]
+                })
+            
+            print(f"[OK] Found {len(contracts)} contracts")
+            return contracts
+    except Exception as e:
+        print(f"[ERROR] Failed to retrieve contracts: {e}")
+        raise
 
 def search_similar_clauses(query_text, top_k=5):
     """
