@@ -49,6 +49,12 @@ from groq import Groq
 from neo4j import GraphDatabase
 from langgraph.graph import StateGraph, END
 from sentence_transformers import SentenceTransformer
+try:
+    import weaviate
+    WEAVIATE_AVAILABLE = True
+except ImportError:
+    WEAVIATE_AVAILABLE = False
+    print("[WARNING] weaviate-client not installed. Install with: pip install weaviate-client")
 
 # Embedding configuration
 EMBEDDING_DIM = 384  # Standardized dimension for all-MiniLM-L6-v2
@@ -75,7 +81,7 @@ def validate_env_vars():
     # Weaviate is optional but recommended
     weaviate_url = os.getenv('WEAVIATE_URL')
     if not weaviate_url:
-        print("[WARNING] WEAVIATE_URL not set. Vector search will use manual cosine similarity.")
+        print("[WARNING] WEAVIATE_URL not set. Vector search will use manual cosine similarity in Neo4j.")
     return True
 
 # Validate on import
@@ -437,7 +443,7 @@ HF_API_URL = (
 # Groq
 groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-# Neo4j - Auto-fix Aura URI for SSL compatibility
+# Neo4j - Auto-fix Aura URI for SSL compatibility (required)
 uri = os.environ["NEO4J_URI"]
 
 # Fix for Neo4j Aura: convert neo4j+s:// to neo4j+ssc:// (uses system cert store)
@@ -445,22 +451,102 @@ if "neo4j+s://" in uri and "neo4j+ssc://" not in uri:
     uri = uri.replace("neo4j+s://", "neo4j+ssc://")
     print(f"[UPDATE] Updated URI for Aura compatibility: {uri[:50]}...")
 
-neo4j_driver = GraphDatabase.driver(
-    uri,
-    auth=(os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"])
-)
+neo4j_driver = None
+max_connection_retries = 3
+for attempt in range(max_connection_retries):
+    try:
+        neo4j_driver = GraphDatabase.driver(
+            uri,
+            auth=(os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"])
+        )
+        
+        # Test connection
+        neo4j_driver.verify_connectivity()
+        print("[OK] Neo4j connection successful!")
+        break
+    except Exception as e:
+        if attempt < max_connection_retries - 1:
+            print(f"[WARNING] Neo4j connection attempt {attempt + 1} failed: {e}")
+            print(f"[INFO] Retrying in {RETRY_DELAY} seconds...")
+            time.sleep(RETRY_DELAY)
+        else:
+            print(f"[ERROR] Neo4j connection failed after {max_connection_retries} attempts: {e}")
+            print("[TIP] Make sure:")
+            print("   1. Your NEO4J_URI is correct (check your Neo4j Aura dashboard)")
+            print("   2. Your NEO4J_URI uses neo4j+ssc:// or neo4j+s://")
+            print("   3. Username and password are correct")
+            print("   4. Your Aura database is running (not paused)")
+            print("   5. Your internet connection is working")
+            print("\n[ERROR] Neo4j is required. Please fix the connection and restart the app.")
+            raise
 
-# Test connection
-try:
-    neo4j_driver.verify_connectivity()
-    print("[OK] Neo4j Aura connection successful!")
-except Exception as e:
-    print(f"[ERROR] Neo4j connection failed: {e}")
-    print("[TIP] Make sure:")
-    print("   1. Your NEO4J_URI uses neo4j+ssc:// or neo4j+s://")
-    print("   2. Username and password are correct")
-    print("   3. Your Aura database is running")
-    raise
+# ===== Weaviate Client Initialization =====
+weaviate_client = None
+if WEAVIATE_AVAILABLE and os.getenv('WEAVIATE_URL'):
+    try:
+        weaviate_url = os.getenv('WEAVIATE_URL')
+        weaviate_api_key = os.getenv('WEAVIATE_API_KEY')
+        
+        # Use v3 API (weaviate-client<4.0.0)
+        if weaviate_api_key:
+            weaviate_client = weaviate.Client(
+                url=weaviate_url,
+                auth_client_secret=weaviate.AuthApiKey(api_key=weaviate_api_key)
+            )
+        else:
+            weaviate_client = weaviate.Client(url=weaviate_url)
+        
+        # Test connection
+        weaviate_client.schema.get()
+        print("[OK] Weaviate client connected successfully!")
+    except Exception as e:
+        print(f"[WARNING] Weaviate connection failed: {e}")
+        print("[TIP] Make sure Weaviate is running: docker run -d -p 8080:8080 semitechnologies/weaviate:latest")
+        weaviate_client = None
+else:
+    if not WEAVIATE_AVAILABLE:
+        print("[INFO] Weaviate not available (package not installed)")
+    elif not os.getenv('WEAVIATE_URL'):
+        print("[INFO] WEAVIATE_URL not set. Vector search will use manual cosine similarity in Neo4j.")
+
+def setup_weaviate_schema():
+    """Create Weaviate schema for storing contract clauses"""
+    if not weaviate_client:
+        return False
+    
+    try:
+        schema = {
+            "class": "ContractClause",
+            "description": "Legal contract clauses with embeddings for vector search",
+            "vectorizer": "none",  # We provide our own embeddings
+            "properties": [
+                {"name": "clause_name", "dataType": ["text"]},
+                {"name": "summary", "dataType": ["text"]},
+                {"name": "contract_id", "dataType": ["string"]},
+                {"name": "contract_title", "dataType": ["text"]},
+                {"name": "risk_level", "dataType": ["string"]},
+                {"name": "risk_reason", "dataType": ["text"]},
+                {"name": "obligation", "dataType": ["text"]},
+                {"name": "liability", "dataType": ["text"]},
+                {"name": "ai_summary", "dataType": ["text"]},
+            ]
+        }
+        
+        # Delete existing class if it exists (optional - comment out to preserve data)
+        if weaviate_client.schema.exists("ContractClause"):
+            print("[INFO] ContractClause schema already exists. Skipping creation.")
+            return True
+        
+        weaviate_client.schema.create_class(schema)
+        print("[OK] Weaviate schema 'ContractClause' created successfully")
+        return True
+    except Exception as e:
+        print(f"[WARNING] Failed to create Weaviate schema: {e}")
+        return False
+
+# Initialize schema on startup if Weaviate is available
+if weaviate_client:
+    setup_weaviate_schema()
 
 def get_embeddings_api(text):
     """Get embeddings using HuggingFace Inference API"""
@@ -1030,8 +1116,32 @@ def store_graph_agent(state: ContractState):
             display_name=f"{clause_name_clean} ({risk_level_clean})",  # For Neo4j display
             risk_color="[LOW]" if risk_level_clean == "LOW" else ("[MED]" if risk_level_clean == "MEDIUM" else "[HIGH]")
             )
+            
+            # Store in Weaviate for vector search
+            if weaviate_client:
+                try:
+                    weaviate_client.data_object.create(
+                        data_object={
+                            "clause_name": clause_name_clean,
+                            "summary": summary_clean,
+                            "contract_id": cid,
+                            "contract_title": data.get("title", "Unknown Contract"),
+                            "risk_level": risk_level_clean,
+                            "risk_reason": safe_str(cl.get("risk_reason")) or "",
+                            "obligation": safe_str(cl.get("obligation")) or "",
+                            "liability": safe_str(cl.get("liability")) or "",
+                            "ai_summary": safe_str(cl.get("ai_summary")) or "",
+                        },
+                        class_name="ContractClause",
+                        vector=clause_emb  # Store embedding as vector
+                    )
+                except Exception as e:
+                    print(f"[WARNING] Failed to store clause in Weaviate: {e}")
 
-    print("[OK] Stored successfully with vector embeddings")
+    if weaviate_client:
+        print("[OK] Stored successfully in Neo4j and Weaviate with vector embeddings")
+    else:
+        print("[OK] Stored successfully in Neo4j with vector embeddings")
     return state
 
 graph = StateGraph(ContractState)
@@ -1125,7 +1235,7 @@ def retrieve_all_contracts():
 
 def search_similar_clauses(query_text, top_k=5):
     """
-    Search for similar clauses using vector embeddings (Neo4j cosine similarity)
+    Search for similar clauses using Weaviate vector search (if available) or Neo4j cosine similarity (fallback)
     """
     print(f"\n[SEARCH] Searching for clauses similar to: '{query_text}'")
     
@@ -1140,6 +1250,41 @@ def search_similar_clauses(query_text, top_k=5):
     if isinstance(query_emb[0], list):
         query_emb = query_emb[0]
     
+    # Use Weaviate if available (faster and more scalable)
+    if weaviate_client:
+        try:
+            result = weaviate_client.query.get(
+                "ContractClause",
+                ["clause_name", "summary", "contract_id", "contract_title", 
+                 "risk_level", "risk_reason", "obligation", "liability"]
+            ).with_near_vector({
+                "vector": query_emb,
+                "certainty": 0.7  # Similarity threshold (0.0 to 1.0)
+            }).with_limit(top_k).do()
+            
+            clauses = []
+            for item in result.get("data", {}).get("Get", {}).get("ContractClause", []):
+                certainty = item.get("_additional", {}).get("certainty", 0)
+                clauses.append({
+                    "contract": item.get("contract_title", ""),
+                    "clause": item.get("clause_name", ""),
+                    "summary": item.get("summary", ""),
+                    "risk_level": item.get("risk_level", ""),
+                    "similarity": float(certainty)  # Weaviate returns certainty (0-1)
+                })
+            
+            print(f"\n[STATS] Top {len(clauses)} similar clauses (Weaviate):")
+            for i, clause in enumerate(clauses, 1):
+                print(f"\n[{i}] Similarity: {clause['similarity']:.4f}")
+                print(f"    Contract: {clause['contract']}")
+                print(f"    Clause: {clause['clause']}")
+                print(f"    Summary: {clause['summary']}")
+            
+            return clauses
+        except Exception as e:
+            print(f"[WARNING] Weaviate search failed: {e}. Falling back to Neo4j.")
+    
+    # Fallback to Neo4j cosine similarity
     with neo4j_driver.session() as s:
         # Get all clauses with embeddings
         result = s.run("""
@@ -1173,7 +1318,7 @@ def search_similar_clauses(query_text, top_k=5):
         # Sort by similarity
         clauses.sort(key=lambda x: x["similarity"], reverse=True)
         
-        print(f"\n[STATS] Top {top_k} similar clauses:")
+        print(f"\n[STATS] Top {top_k} similar clauses (Neo4j fallback):")
         for i, clause in enumerate(clauses[:top_k], 1):
             print(f"\n[{i}] Similarity: {clause['similarity']:.4f}")
             print(f"    Contract: {clause['contract']}")
@@ -1181,6 +1326,83 @@ def search_similar_clauses(query_text, top_k=5):
             print(f"    Summary: {clause['summary']}")
         
         return clauses[:top_k]
+
+def find_precedent_clauses(clause_text, contract_id=None, top_k=10):
+    """
+    Find similar clauses from other contracts (precedent matching).
+    Excludes the current contract if contract_id is provided.
+    
+    Args:
+        clause_text: Text of the clause to find precedents for
+        contract_id: Optional contract ID to exclude from results
+        top_k: Number of precedents to return
+    
+    Returns:
+        List of precedent clauses with similarity scores
+    """
+    print(f"\n[PRECEDENT] Finding precedent clauses for: '{clause_text[:50]}...'")
+    
+    if not weaviate_client:
+        print("[WARNING] Weaviate not available. Precedent matching requires Weaviate.")
+        return []
+    
+    # Generate embedding for query
+    query_emb = get_embeddings_api(clause_text)
+    if not query_emb:
+        print("[ERROR] Could not generate query embedding")
+        return []
+    
+    # Normalize if nested
+    if isinstance(query_emb[0], list):
+        query_emb = query_emb[0]
+    
+    try:
+        # Build query with optional contract filter
+        query = weaviate_client.query.get(
+            "ContractClause",
+            ["clause_name", "summary", "contract_id", "contract_title", 
+             "risk_level", "risk_reason", "obligation", "liability"]
+        ).with_near_vector({
+            "vector": query_emb,
+            "certainty": 0.75  # Higher threshold for precedents
+        })
+        
+        # Exclude current contract if specified
+        if contract_id:
+            query = query.with_where({
+                "path": ["contract_id"],
+                "operator": "NotEqual",
+                "valueString": contract_id
+            })
+        
+        result = query.with_limit(top_k).do()
+        
+        precedents = []
+        for item in result.get("data", {}).get("Get", {}).get("ContractClause", []):
+            certainty = item.get("_additional", {}).get("certainty", 0)
+            precedents.append({
+                "contract": item.get("contract_title", ""),
+                "contract_id": item.get("contract_id", ""),
+                "clause": item.get("clause_name", ""),
+                "summary": item.get("summary", ""),
+                "risk_level": item.get("risk_level", ""),
+                "risk_reason": item.get("risk_reason", ""),
+                "obligation": item.get("obligation", ""),
+                "liability": item.get("liability", ""),
+                "similarity": float(certainty)
+            })
+        
+        print(f"\n[STATS] Found {len(precedents)} precedent clauses:")
+        for i, precedent in enumerate(precedents, 1):
+            print(f"\n[{i}] Similarity: {precedent['similarity']:.4f}")
+            print(f"    Contract: {precedent['contract']}")
+            print(f"    Clause: {precedent['clause']}")
+            print(f"    Risk Level: {precedent['risk_level']}")
+        
+        return precedents
+    except Exception as e:
+        print(f"[ERROR] Precedent search failed: {e}")
+        return []
 
 # ===== PROCESS CONTRACTS =====
 # This code is commented out - it should be called from main() or via the web interface
