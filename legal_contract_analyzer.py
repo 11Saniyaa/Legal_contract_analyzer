@@ -48,7 +48,16 @@ import requests
 from groq import Groq
 from neo4j import GraphDatabase
 from langgraph.graph import StateGraph, END
-from sentence_transformers import SentenceTransformer
+
+# Local imports
+from config import (
+    MAX_RETRIES, RETRY_DELAY, RETRY_BACKOFF,
+    HF_API_URL,
+    GROQ_API_KEY, HF_TOKEN, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD,
+    WEAVIATE_URL, WEAVIATE_API_KEY, get_neo4j_uri, MAX_CONNECTION_RETRIES
+)
+
+# Weaviate import (optional)
 try:
     import weaviate
     WEAVIATE_AVAILABLE = True
@@ -56,31 +65,11 @@ except ImportError:
     WEAVIATE_AVAILABLE = False
     print("[WARNING] weaviate-client not installed. Install with: pip install weaviate-client")
 
-# Embedding configuration
-EMBEDDING_DIM = 384  # Standardized dimension for all-MiniLM-L6-v2
-HF_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-MAX_TEXT_CHUNK = 8000  # Max characters per chunk
-CHUNK_OVERLAP = 500    # Overlap between chunks
-
-# API Configuration
-GROQ_MODEL = "llama-3.1-8b-instant"
-MAX_TOKENS = 8000
-TEMPERATURE = 0.1
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAY = 1  # seconds
-
 def validate_env_vars():
     """Validate required environment variables"""
-    required = ['GROQ_API_KEY', 'HF_TOKEN', 'NEO4J_URI', 'NEO4J_USERNAME', 'NEO4J_PASSWORD']
-    missing = [var for var in required if not os.getenv(var)]
-    if missing:
-        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
-    
-    # Weaviate is optional but recommended
-    weaviate_url = os.getenv('WEAVIATE_URL')
-    if not weaviate_url:
+    # Validation is now done in config.py via get_env_var with required=True
+    # This function is kept for backward compatibility
+    if not WEAVIATE_URL:
         print("[WARNING] WEAVIATE_URL not set. Vector search will use manual cosine similarity in Neo4j.")
     return True
 
@@ -95,7 +84,7 @@ except ValueError as e:
 
 # ===== Retry Logic with Exponential Backoff =====
 
-def retry_with_backoff(max_retries=MAX_RETRIES, delay=RETRY_DELAY, backoff=2):
+def retry_with_backoff(max_retries=MAX_RETRIES, delay=RETRY_DELAY, backoff=RETRY_BACKOFF):
     """Decorator for retrying functions with exponential backoff"""
     def decorator(func):
         @wraps(func)
@@ -122,7 +111,7 @@ print("[OK] Retry utility loaded")
 
 
 # ===== IMPROVED: Text Chunking for Large Contracts =====
-def chunk_text(text: str, max_size: int = MAX_TEXT_CHUNK, overlap: int = CHUNK_OVERLAP) -> list:
+def chunk_text(text: str, max_size: int = 8000, overlap: int = 500) -> list:
     """
     Split large text into overlapping chunks for processing.
     
@@ -227,13 +216,13 @@ def get_embeddings_api_improved(text: str) -> Optional[list]:
     }
     
     payload = {
-        "inputs": text[:MAX_TEXT_CHUNK],  # Limit input size
+        "inputs": text[:8000],  # Limit input size
         "options": {"wait_for_model": True}
     }
     
     try:
         response = requests.post(
-            f"https://router.huggingface.co/hf-inference/models/{HF_EMBED_MODEL}",
+            f"https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2",
             headers=headers,
             json=payload,
             timeout=30
@@ -254,14 +243,14 @@ def get_embeddings_api_improved(text: str) -> Optional[list]:
                 emb = result
             
             # Validate dimension
-            if isinstance(emb, list) and len(emb) == EMBEDDING_DIM:
+            if isinstance(emb, list) and len(emb) == 384:
                 return emb
             elif isinstance(emb, list) and len(emb) > 0:
                 # Truncate or pad to correct dimension
-                if len(emb) > EMBEDDING_DIM:
-                    return emb[:EMBEDDING_DIM]
+                if len(emb) > 384:
+                    return emb[:384]
                 else:
-                    return emb + [0.0] * (EMBEDDING_DIM - len(emb))
+                    return emb + [0.0] * (384 - len(emb))
             else:
                 return None
         else:
@@ -275,7 +264,7 @@ def get_embeddings_api_improved(text: str) -> Optional[list]:
         print(f"[WARNING] HF API error: {str(e)}")
         return None
 
-def validate_embedding(emb: Optional[list], expected_dim: int = EMBEDDING_DIM) -> list:
+def validate_embedding(emb: Optional[list], expected_dim: int = 384) -> list:
     """
     Validate and fix embedding dimensions.
     
@@ -432,32 +421,21 @@ print("[OK] Improved JSON parsing utilities loaded")
 
 
 
-# ===== HF EMBEDDING VIA API (NO MODEL DOWNLOAD) =====
-import requests
-
-HF_TOKEN = os.environ.get("HF_TOKEN")
-HF_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"  # Reliable model
-HF_API_URL = (
-    f"https://router.huggingface.co/hf-inference/models/{HF_EMBED_MODEL}"
-)
-# Groq
-groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+# ===== Initialize Clients =====
+# Groq client
+groq_client = Groq(api_key=GROQ_API_KEY)
 
 # Neo4j - Auto-fix Aura URI for SSL compatibility (required)
-uri = os.environ["NEO4J_URI"]
-
-# Fix for Neo4j Aura: convert neo4j+s:// to neo4j+ssc:// (uses system cert store)
-if "neo4j+s://" in uri and "neo4j+ssc://" not in uri:
-    uri = uri.replace("neo4j+s://", "neo4j+ssc://")
+uri = get_neo4j_uri()
+if uri != NEO4J_URI:
     print(f"[UPDATE] Updated URI for Aura compatibility: {uri[:50]}...")
 
 neo4j_driver = None
-max_connection_retries = 3
-for attempt in range(max_connection_retries):
+for attempt in range(MAX_CONNECTION_RETRIES):
     try:
         neo4j_driver = GraphDatabase.driver(
             uri,
-            auth=(os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"])
+            auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
         )
         
         # Test connection
@@ -465,12 +443,12 @@ for attempt in range(max_connection_retries):
         print("[OK] Neo4j connection successful!")
         break
     except Exception as e:
-        if attempt < max_connection_retries - 1:
+        if attempt < MAX_CONNECTION_RETRIES - 1:
             print(f"[WARNING] Neo4j connection attempt {attempt + 1} failed: {e}")
             print(f"[INFO] Retrying in {RETRY_DELAY} seconds...")
             time.sleep(RETRY_DELAY)
         else:
-            print(f"[ERROR] Neo4j connection failed after {max_connection_retries} attempts: {e}")
+            print(f"[ERROR] Neo4j connection failed after {MAX_CONNECTION_RETRIES} attempts: {e}")
             print("[TIP] Make sure:")
             print("   1. Your NEO4J_URI is correct (check your Neo4j Aura dashboard)")
             print("   2. Your NEO4J_URI uses neo4j+ssc:// or neo4j+s://")
@@ -506,7 +484,7 @@ if WEAVIATE_AVAILABLE and os.getenv('WEAVIATE_URL'):
 else:
     if not WEAVIATE_AVAILABLE:
         print("[INFO] Weaviate not available (package not installed)")
-    elif not os.getenv('WEAVIATE_URL'):
+    elif not WEAVIATE_URL:
         print("[INFO] WEAVIATE_URL not set. Vector search will use manual cosine similarity in Neo4j.")
 
 def setup_weaviate_schema():
@@ -547,29 +525,6 @@ def setup_weaviate_schema():
 # Initialize schema on startup if Weaviate is available
 if weaviate_client:
     setup_weaviate_schema()
-
-def get_embeddings_api(text):
-    """Get embeddings using HuggingFace Inference API"""
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    payload = {"inputs": text, "options": {"wait_for_model": True}}
-    
-    try:
-        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=2)
-        
-        if response.status_code == 200:
-            result = response.json()
-            # Handle different response formats
-            if isinstance(result, list):
-                if isinstance(result[0], list):
-                    return result[0]  # Nested list
-                return result
-            return result
-        else:
-            # print(f"[ERROR] API Error: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        print(f"[ERROR] Exception: {str(e)}")
-        return None
 
 print("[OK] Clients initialized (API mode - no model download)")
 
@@ -706,13 +661,23 @@ def embedding_agent(state: ContractState):
         "embeddings": emb
     }
 def get_embeddings_api(text):
+    """
+    Get embeddings using HuggingFace Inference API.
+    This is the main function used throughout the codebase.
+    
+    Args:
+        text: Text to generate embeddings for
+    
+    Returns:
+        List of floats (384 dimensions) or None if failed
+    """
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "inputs": text,
+        "inputs": text[:8000],  # Limit input size
         "options": {
             "wait_for_model": True
         }
@@ -732,16 +697,23 @@ def get_embeddings_api(text):
             # HF returns: [ [token_embeddings...] ]
             # We must MEAN POOL
             if isinstance(result, list) and isinstance(result[0], list):
-                import numpy as np
                 return np.mean(result, axis=0).tolist()
 
-            print("[WARNING] Unexpected HF response:", result)
+            # Handle single list response
+            if isinstance(result, list) and len(result) > 0:
+                if not isinstance(result[0], list):
+                    return result
+
+            print("[WARNING] Unexpected HF response format")
             return None
 
         else:
-            # print(f"[ERROR] API Error: {response.status_code} - {response.text}")
+            print(f"[WARNING] HF API returned status {response.status_code}")
             return None
 
+    except requests.exceptions.Timeout:
+        print("[WARNING] HF API request timed out")
+        return None
     except Exception as e:
         print(f"[ERROR] Exception: {e}")
         return None
