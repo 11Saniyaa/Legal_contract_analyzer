@@ -85,3 +85,4 @@ def get_logger(name: str) -> logging.Logger:
 # Can be overridden by calling setup_logging() with different parameters
 setup_logging(level="INFO", detailed=False)
 
+

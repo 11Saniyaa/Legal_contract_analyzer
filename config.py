@@ -67,3 +67,4 @@ HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{HF_EMBED_MODEL
 # ===== Database Connection Retries =====
 MAX_CONNECTION_RETRIES = 3
 
+
