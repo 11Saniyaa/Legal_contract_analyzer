@@ -1097,6 +1097,28 @@ def store_graph_agent(state: ContractState):
                     print(f"[WARNING] Failed to generate embedding for clause: {e}")
                     clause_embeddings[id(futures[future])] = [0.0] * 384
 
+    # ===== IMPROVEMENT: Prepare clauses data before transaction =====
+    # Prepare clauses data outside transaction so it's available for Weaviate
+    clauses_data = []
+    for cl in clauses:
+        clause_name_clean = safe_str(cl.get("clause_name")) or "Unnamed Clause"
+        summary_clean = safe_str(cl.get("summary")) or ""
+        risk_level_clean = normalize_risk_level(cl.get("risk_level"))
+        clause_emb = clause_embeddings.get(id(cl), [0.0] * 384)
+        
+        clauses_data.append({
+            "name": clause_name_clean,
+            "summary": summary_clean,
+            "risk_level": risk_level_clean,
+            "risk_reason": safe_str(cl.get("risk_reason")) or "",
+            "obligation": safe_str(cl.get("obligation")) or "",
+            "liability": safe_str(cl.get("liability")) or "",
+            "ai_summary": safe_str(cl.get("ai_summary")) or "",
+            "embedding": clause_emb,
+            "display_name": f"{clause_name_clean} ({risk_level_clean})",
+            "risk_color": "[LOW]" if risk_level_clean == "LOW" else ("[MED]" if risk_level_clean == "MEDIUM" else "[HIGH]")
+        })
+
     # ===== IMPROVEMENT: Batch all database operations in single transaction =====
     with neo4j_driver.session() as s:
         tx = s.begin_transaction()
@@ -1138,26 +1160,6 @@ def store_graph_agent(state: ContractState):
                 """, dates=dates_data, id=cid)
 
             # 4. Batch create all clauses
-            clauses_data = []
-            for cl in clauses:
-                clause_name_clean = safe_str(cl.get("clause_name")) or "Unnamed Clause"
-                summary_clean = safe_str(cl.get("summary")) or ""
-                risk_level_clean = normalize_risk_level(cl.get("risk_level"))
-                clause_emb = clause_embeddings.get(id(cl), [0.0] * 384)
-                
-                clauses_data.append({
-                    "name": clause_name_clean,
-                    "summary": summary_clean,
-                    "risk_level": risk_level_clean,
-                    "risk_reason": safe_str(cl.get("risk_reason")) or "",
-                    "obligation": safe_str(cl.get("obligation")) or "",
-                    "liability": safe_str(cl.get("liability")) or "",
-                    "ai_summary": safe_str(cl.get("ai_summary")) or "",
-                    "embedding": clause_emb,
-                    "display_name": f"{clause_name_clean} ({risk_level_clean})",
-                    "risk_color": "[LOW]" if risk_level_clean == "LOW" else ("[MED]" if risk_level_clean == "MEDIUM" else "[HIGH]")
-                })
-            
             if clauses_data:
                 tx.run("""
                     UNWIND $clauses AS clause
@@ -1177,7 +1179,7 @@ def store_graph_agent(state: ContractState):
 
             # Commit transaction
             tx.commit()
-            print("[OK] All data stored in Neo4j successfully")
+            print(f"[OK] All data stored in Neo4j successfully: Contract '{data.get('title', 'Unknown')}' with {len(clauses_data)} clauses")
             
         except Exception as e:
             tx.rollback()
