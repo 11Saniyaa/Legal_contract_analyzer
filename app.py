@@ -38,7 +38,7 @@ class SuppressOutput:
 with SuppressOutput():
     from legal_contract_analyzer import (
         workflow, pdf_hash, retrieve_all_contracts, retrieve_contract_from_db,
-        view_contract_clean_graph, neo4j_driver, weaviate_client, setup_weaviate_schema
+        view_contract_clean_graph, neo4j_driver
     )
 
 # Cached wrapper for retrieve_all_contracts to improve performance
@@ -371,78 +371,33 @@ elif page == "View Contracts":
                 del st.session_state[key]
             st.rerun()
     with col_test:
-        if st.button("🔍 Test DB", help="Test Neo4j and Weaviate connections"):
+        if st.button("🔍 Test DB", help="Test Neo4j connection"):
             with SuppressOutput():
-                col_test1, col_test2 = st.columns(2)
-                
-                with col_test1:
-                    st.write("**Neo4j:**")
-                    try:
-                        if neo4j_driver:
-                            neo4j_driver.verify_connectivity()
-                            with neo4j_driver.session() as s:
-                                result = s.run("MATCH (c:Contract) RETURN count(c) as count")
-                                count = result.single()["count"]
-                            st.success(f"✅ {count} contract(s)")
-                        else:
-                            st.error("❌ Not connected")
-                    except Exception as e:
-                        st.error(f"❌ {str(e)[:30]}")
-                
-                with col_test2:
-                    st.write("**Weaviate:**")
-                    try:
-                        if weaviate_client:
-                            schema = weaviate_client.schema.get()
-                            classes = [c.get('class', '') for c in schema.get('classes', [])]
-                            if 'ContractClause' in classes:
-                                result = weaviate_client.query.aggregate("ContractClause").with_meta_count().do()
-                                count = result.get('data', {}).get('Aggregate', {}).get('ContractClause', [{}])[0].get('meta', {}).get('count', 0)
-                                st.success(f"✅ {count} clause(s)")
-                            else:
-                                st.warning("⚠️ No schema")
-                        else:
-                            st.error("❌ Not connected")
-                    except Exception as e:
-                        st.error(f"❌ {str(e)[:30]}")
+                st.write("**Neo4j:**")
+                try:
+                    if neo4j_driver:
+                        neo4j_driver.verify_connectivity()
+                        with neo4j_driver.session() as s:
+                            result = s.run("MATCH (c:Contract) RETURN count(c) as count")
+                            count = result.single()["count"]
+                        st.success(f"✅ {count} contract(s)")
+                    else:
+                        st.error("❌ Not connected")
+                except Exception as e:
+                    st.error(f"❌ {str(e)[:30]}")
     
     # Debug: Show connection status
-    col_neo4j, col_weaviate = st.columns(2)
-    
-    with col_neo4j:
-        with SuppressOutput():
-            if neo4j_driver is None:
-                st.error("❌ **Neo4j: Not Connected**")
-                st.warning("Contracts cannot be stored without Neo4j.")
-            else:
-                try:
-                    neo4j_driver.verify_connectivity()
-                    st.success("✅ **Neo4j: Connected**")
-                except Exception as conn_error:
-                    st.error(f"❌ **Neo4j: Failed**")
-                    st.caption(str(conn_error)[:50])
-    
-    with col_weaviate:
-        with SuppressOutput():
-            if weaviate_client is None:
-                st.warning("⚠️ **Weaviate: Not Connected**")
-                st.caption("Vector search will use Neo4j")
-            else:
-                try:
-                    schema = weaviate_client.schema.get()
-                    classes = [c.get('class', '') for c in schema.get('classes', [])]
-                    if 'ContractClause' in classes:
-                        # Count objects
-                        result = weaviate_client.query.aggregate("ContractClause").with_meta_count().do()
-                        count = result.get('data', {}).get('Aggregate', {}).get('ContractClause', [{}])[0].get('meta', {}).get('count', 0)
-                        st.success(f"✅ **Weaviate: Connected**")
-                        st.caption(f"Schema: ContractClause ({count} clauses)")
-                    else:
-                        st.warning("⚠️ **Weaviate: Connected (No Schema)**")
-                        st.caption("Schema will be created on first upload")
-                except Exception as w_error:
-                    st.error(f"❌ **Weaviate: Error**")
-                    st.caption(str(w_error)[:50])
+    with SuppressOutput():
+        if neo4j_driver is None:
+            st.error("❌ **Neo4j: Not Connected**")
+            st.warning("Contracts cannot be stored without Neo4j.")
+        else:
+            try:
+                neo4j_driver.verify_connectivity()
+                st.success("✅ **Neo4j: Connected**")
+            except Exception as conn_error:
+                st.error(f"❌ **Neo4j: Failed**")
+                st.caption(str(conn_error)[:50])
     
     st.markdown("---")
     
